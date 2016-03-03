@@ -17,20 +17,25 @@ Constructor method
 Open the Lawncipher document store
 * `String password` : the master Lawncipher password
 * `Function callback` : callback function. Receiving only an `err` string, that is defined in case an error occurred while opening the DB. This callback function is invoked when the DB collection list has been loaded
+
 ### `Lawncipher.close()`
 Close Lawncipher, if open
+
 ### `Lawncipher.isOpen()`
 Returns a boolean, indicating whether Lawncipher is open or not
+
 ### `Lawncipher.collection(name, indexModel, callback)`
 Open an existing Lawncipher collection, or creates it if it doesn't exist
 * `String name` : the collection's name
 * `Object|Array<String> indexModel` : the index model. The attributes that will be extracted and/or saved in the collection's \_index file. The query-able data. If the collection already exists, this parameter will simply be ignored. Optional parameter.
 * `Function callback` : callback function, receiving errors or the constructed Collection object (`function(err, collection)`)
 * returns the constructed `Collection` object
+
 ### `Lawncipher.collections(callback)`
 Getting the names of existing collections
 * `Function callback(err, collectionsNames)` : callback function receiving an error or the collectionsNames array of strings
 * Returns the collectionsNames array of strings
+
 ### `Lawncipher.dropCollection(collectionName, callback)`
 Deleting an existing collection. Note that this operation once invoked cannot be undone.
 * `String collectionName` : the name of the collection to be deleted
