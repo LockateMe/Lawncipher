@@ -13,9 +13,9 @@ Building a rather versatile and persistent encrypted document storage.
 Constructor method
 * `String rootPath` : root Lawncipher directory path
 
-### `Lawncipher.open(password, callback)`
+### `Lawncipher.open(rootKey, callback)`
 Open the Lawncipher document store
-* `String password` : the master Lawncipher password
+* `Uint8Array rootKey` : the Lawncipher root key
 * `Function callback` : callback function. Receiving only an `err` string, that is defined in case an error occurred while opening the DB. This callback function is invoked when the DB collection list has been loaded
 
 ### `Lawncipher.close()`
