@@ -12,6 +12,7 @@ Building a rather versatile and persistent encrypted document storage.
 ### `Lawncipher(rootPath)`
 Constructor method
 * `String rootPath` : root Lawncipher directory path
+
 ### `Lawncipher.open(password, callback)`
 Open the Lawncipher document store
 * `String password` : the master Lawncipher password
