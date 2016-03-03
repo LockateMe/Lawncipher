@@ -172,6 +172,7 @@ Two versions possible:
 ```
 
 Notes:
+* `type` must be equal to one of the following : 'string', 'date', 'number', 'boolean', 'object', 'array', 'buffer', '\*'
 * `unique` and `id` parameters are optional. If not defined, they are then assumed as `false`
 * a field set as `id` is also implicitly unique
 *	you can only set one field as ID. If you transgress this rule, the collection construction will return an error
