@@ -68,21 +68,18 @@
 
 	var indexNamesRegex = /^_index(?:\d+)?$/g;
 
-	var vanillaConstructor = Lawncipher;
-	var cordovaConstructor = function(rootPath, storageManager){
-		fs = fs || storageManager;
-		if (!(typeof fs == 'object' && fs != null)) throw new TypeError('No file system found');
-	};
+	exports.db = Lawncipher;
 
-	//Is it a good idea to have various construction APIs?
-	if (nodeContext){
-		exports.db = vanillaConstructor;
-	} else {
+	function Lawncipher(rootPath, fs, pathJoin){
+		if (!(typeof rootPath == 'string' && rootPath.length > 0)) throw new TypeError('rootPath must be a non-null string');
+		if (!(fs && typeof fs == 'object')){
+			if (nodeContext) fs = require('fs');
+			else throw new TypeError('fs must be a defined object');
+		}
+		if (pathJoin){
+			if (typeof pathJoin != 'function') throw new TypeError('when defined, pathJoin must be a function');
+		} else pathJoin = _pathJoin; //Use local implementation as fallback
 
-	}
-	exports.db ;
-
-	function Lawncipher(rootPath){
 		var rootKey;
 		var collectionIndex;
 		var collectionIndexPath = pathJoin(rootPath, '_index');
@@ -372,7 +369,7 @@
 		* @param {String} part2 - the second part of the path. Can also be used if part1 is an array of strings
 		* @returns {String} - the constructed file path
 		*/
-		function pathJoin(part1, part2){
+		function _pathJoin(part1, part2){
 			if (Array.isArray(part1)){
 				if (part1.length == 0) return;
 
