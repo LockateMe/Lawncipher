@@ -20,7 +20,7 @@
 }(this, function(exports, sodium, _fs, console, nodeContext, window){
 
 	//Handling fs loading
-	var fs;
+	/*var fs;
 	if (nodeContext) fs = _fs; //In case we are in Node.js, _fs = require('fs');
 	else { //In case we are in cordova,
 		_fs.init(function(err){
@@ -31,18 +31,9 @@
 
 			var fs = _fs(window._fs);
 		});
-	}
+	}*/
 
-}));
-(function(window){
-
-	var console = window.console;
-	var sodium = window.sodium;
 	if (!sodium) throw new Error('Wrong import or concat order. Libsodium is missing');
-
-	// As long as we can do without it, better not make the code more complicated (in terms of dependencies) than it needs to be.
-	//var cryptoUtils = LockateMeApp.cryptoUtils;
-	//if (!cryptoUtils) throw new Error('Wrong import or concat order. cryptoUtils is unreachable...');
 
 	var from_hex = sodium.from_hex, to_hex = sodium.to_hex, from_base64 = sodium.from_base64, to_base64 = sodium.to_base64;
 	var from_string = sodium.string_to_Uint8Array || sodium.from_string, to_string = sodium.uint8Array_to_String || sodium.to_string;
@@ -2090,4 +2081,12 @@
 		function in_avail(){return buffer.length - rIndex;}
 	}
 
-})(window);
+}));
+
+/*(function(window){
+
+	var console = window.console;
+	var sodium = window.sodium;
+
+
+})(window);*/
