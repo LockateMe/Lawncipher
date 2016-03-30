@@ -1,15 +1,14 @@
 (function (LockateMeTests, window){
 
-	function testLawncipher(){
+	function testLawncipher(fs){
 		if (!window.Lawncipher) throw new Error('lawncipher not defined');
-		if (!window.fs) throw new Error('fs not defined');
+		if (!fs) throw new Error('fs not defined');
 
-		var fs = window.fs;
 		var console = window.console;
 		var Lawncipher = window.Lawncipher;
 
 		var dbPath = 'test_db';
-		var db = new Lawncipher(dbPath);
+		var db = new Lawncipher.db(dbPath);
 		var collections = {};
 		var docs = {};
 

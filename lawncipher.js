@@ -15,7 +15,7 @@
 		factory(exports, require('libsodium-wrappers'), console, _nodeContext, require, !_nodeContext ? window : undefined);
 	} else {
 		var cb = root.Lawncipher && root.Lawncipher.onload;
-		factory((root.Lawncipher = {}), sodium, console, _nodeContext, require, !_nodeContext ? window : undefined);
+		factory((root.Lawncipher = {}), sodium, console, _nodeContext, typeof require != 'undefined' && require, !_nodeContext ? window : undefined);
 		if (typeof cb == 'function'){
 			cb(root.Lawncipher);
 		}
@@ -377,34 +377,6 @@
 			var encryptedIndexBuffer = cryptoFileEncoding.encrypt(from_string(collectionIndexStr), rootKey, fileSalt);
 			fs.writeFile(collectionIndexPath, encryptedIndexBuffer, cb);
 		}
-
-		/**
-		* Join file path parts
-		* @private
-		* @param {String|Array<String>} part1 - a path part, or an array of parts
-		* @param {String} part2 - the second part of the path. Can also be used if part1 is an array of strings
-		* @returns {String} - the constructed file path
-		*/
-		function _pathJoin(part1, part2){
-			if (Array.isArray(part1)){
-				if (part1.length == 0) return;
-
-				var totalPath = part1[0];
-				for (var i = 1; i < part1.length; i++){
-					totalPath = pathJoin(totalPath, part1[i]);
-					if (!totalPath) return; //If one the parts were invalid, silently stop concating the parts and return
-				}
-				if (part2 && typeof part2 == 'string') totalPath = pathJoin(totalPath, part2); //If part2 is defined and is a string, concat. Otherwise, ignore.
-				return totalPath;
-			}
-
-			if (!(typeof part1 == 'string' && typeof part2 == 'string')) return; //If one of the parts is not a string, return
-
-			if (part1.lastIndexOf('/') != part1.length - 1){
-				part1 += '/';
-			}
-			return part1 + part2;
-		};
 
 		/**
 		* Lawncipher Collection object constructor
@@ -1829,6 +1801,34 @@
 			return validatedData;
 		}
 
+	};
+
+	/**
+	* Join file path parts
+	* @private
+	* @param {String|Array<String>} part1 - a path part, or an array of parts
+	* @param {String} part2 - the second part of the path. Can also be used if part1 is an array of strings
+	* @returns {String} - the constructed file path
+	*/
+	function _pathJoin(part1, part2){
+		if (Array.isArray(part1)){
+			if (part1.length == 0) return;
+
+			var totalPath = part1[0];
+			for (var i = 1; i < part1.length; i++){
+				totalPath = pathJoin(totalPath, part1[i]);
+				if (!totalPath) return; //If one the parts were invalid, silently stop concating the parts and return
+			}
+			if (part2 && typeof part2 == 'string') totalPath = pathJoin(totalPath, part2); //If part2 is defined and is a string, concat. Otherwise, ignore.
+			return totalPath;
+		}
+
+		if (!(typeof part1 == 'string' && typeof part2 == 'string')) return; //If one of the parts is not a string, return
+
+		if (part1.lastIndexOf('/') != part1.length - 1){
+			part1 += '/';
+		}
+		return part1 + part2;
 	};
 
 	/*
