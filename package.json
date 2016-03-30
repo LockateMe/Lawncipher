@@ -1,0 +1,35 @@
+{
+  "name": "lawncipher",
+  "version": "1.0.0",
+  "description": "An embedded, encrypted, multi-purpose document store",
+  "main": "lawncipher.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LockateMe/Lawncipher.git"
+  },
+  "keywords": [
+    "embedded",
+    "encrypted",
+    "privacy",
+    "database",
+    "document",
+    "store",
+    "nosql"
+  ],
+  "author": "Ahmad Benmrad <batikhsouri@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/LockateMe/Lawncipher/issues"
+  },
+  "homepage": "https://github.com/LockateMe/Lawncipher#readme",
+  "devDependencies": {
+    "grunt": "^0.4.5",
+    "grunt-jsvalidate": "^0.2.2"
+  },
+  "dependencies": {
+    "libsodium-wrappers": "^0.2.12"
+  }
+}
