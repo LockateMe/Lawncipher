@@ -1,0 +1,33 @@
+{
+  "name": "lawncipher",
+  "main": "lawncipher.js",
+  "version": "1.0.0",
+  "authors": [
+    "Ahmad Benmrad (@BatikhSouri)"
+  ],
+  "description": "An embedded, encrypted, multi-purpose document store",
+  "moduleType": [
+    "amd",
+    "es6",
+    "globals",
+    "node"
+  ],
+  "keywords": [
+    "embedded",
+    "encrypted",
+    "privacy",
+    "database",
+    "document",
+    "store",
+    "nosql"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/LockateMe/Lawncipher",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ]
+}
