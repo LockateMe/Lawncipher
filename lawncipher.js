@@ -92,6 +92,8 @@
 	exports.db = Lawncipher;
 
 	function Lawncipher(rootPath){
+		if (!initCalled) throw new TypeError('Lawncipher.init must be called before a Lawncipher.db can be initialized');
+
 		if (!(typeof rootPath == 'string' && rootPath.length > 0)) throw new TypeError('rootPath must be a non-null string');
 
 		var rootKey;
