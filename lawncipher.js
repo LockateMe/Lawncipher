@@ -12,10 +12,10 @@
 	if (typeof define === 'function' && define.amd){
 		define(['exports', 'sodium', 'console', _nodeContext.toString(), 'require', 'window'], factory);
 	} else if (typeof exports !== 'undefined'){
-		factory(exports, require('libsodium-wrappers'), console, _nodeContext, require, window);
+		factory(exports, require('libsodium-wrappers'), console, _nodeContext, require, !_nodeContext ? window : undefined);
 	} else {
 		var cb = root.Lawncipher && root.Lawncipher.onload;
-		factory((root.Lawncipher = {}), sodium, console, _nodeContext, require, window);
+		factory((root.Lawncipher = {}), sodium, console, _nodeContext, require, !_nodeContext ? window : undefined);
 		if (typeof cb == 'function'){
 			cb(root.Lawncipher);
 		}
@@ -1830,7 +1830,7 @@
 			}
 		} else if (typeO == 'number' || typeO == 'string' || typeO == 'boolean') return o;
 	}
-	window.clone = clone;
+	exports.clone = clone;
 
 	/*
 	* Deep object equality
@@ -1876,7 +1876,7 @@
 			throw new TypeError('Cannot check equality for functions');
 		} else return o1 == o2;
 	}
-	window.deepObjectEquality = deepObjectEquality;
+	exports.deepObjectEquality = deepObjectEquality;
 
 	// Logical XOR
 	function xor(a, b){
