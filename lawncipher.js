@@ -2,38 +2,47 @@
 * Lawnchair-inspired libsodium-backed encrypted persistent document storage
 */
 (function(root, factory){
-	if (typeof process === "object" && typeof process.stdout === "undefined") {
-		process.stderr = process.stdout = { write: console.log };
+	var _nodeContext = false;
+	if (typeof process === 'object' && process != null){
+		_nodeContext = true;
 	}
+	/*if (typeof process === "object" && typeof process.stdout === "undefined") {
+		process.stderr = process.stdout = { write: console.log };
+	}*/
 	if (typeof define === 'function' && define.amd){
-
+		define(['exports', 'sodium', 'console', _nodeContext.toString(), 'require', 'window'], factory);
 	} else if (typeof exports !== 'undefined'){
-		factory(exports, require('libsodium-wrappers'), (window && window.plugins.nodefs) || require('fs'), console, !(typeof process == 'undefined' || process == null), window);
+		factory(exports, require('libsodium-wrappers'), console, _nodeContext, require, window);
 	} else {
 		var cb = root.Lawncipher && root.Lawncipher.onload;
-		factory((root.Lawncipher = {}), sodium, fs, console, false, window);
+		factory((root.Lawncipher = {}), sodium, console, _nodeContext, require, window);
 		if (typeof cb == 'function'){
 			cb(root.Lawncipher);
 		}
 	}
 
-}(this, function(exports, sodium, _fs, console, nodeContext, window){
+}(this, function(exports, sodium, console, nodeContext, require, window){
 
-	//Handling fs loading
-	/*var fs;
-	if (nodeContext) fs = _fs; //In case we are in Node.js, _fs = require('fs');
-	else { //In case we are in cordova,
-		_fs.init(function(err){
-			if (err){
-				console.error('Error while loading the FS wrapper: ' + err);
-				return;
-			}
+	var initCalled = false;
+	var fs, pathJoin;
 
-			var fs = _fs(window._fs);
-		});
-	}*/
+	//Adding an init method when not running in Node or in one of its derivatives
+	if (!nodeContext){
+		pathJoin = _pathJoin;
 
-	if (!sodium) throw new Error('Wrong import or concat order. Libsodium is missing');
+		exports.init = function(_fs){
+			if (!(typeof _fs == 'object' && _fs != null)) throw new TypeError('_fs must be a non-null object');
+
+			fs = _fs;
+			initCalled = true;
+		};
+	} else {
+		initCalled = true; //Init call not needed (and not possible) outside of Nodejs
+		fs = require('fs');
+		pathJoin = require('path').join;
+	}
+
+	if (!sodium) throw new Error('Error on loading Lawncipher : Libsodium is missing');
 
 	var from_hex = sodium.from_hex, to_hex = sodium.to_hex, from_base64 = sodium.from_base64, to_base64 = sodium.to_base64;
 	var from_string = sodium.string_to_Uint8Array || sodium.from_string, to_string = sodium.uint8Array_to_String || sodium.to_string;
@@ -61,15 +70,8 @@
 
 	exports.db = Lawncipher;
 
-	function Lawncipher(rootPath, fs, pathJoin){
+	function Lawncipher(rootPath){
 		if (!(typeof rootPath == 'string' && rootPath.length > 0)) throw new TypeError('rootPath must be a non-null string');
-		if (!(fs && typeof fs == 'object')){
-			if (nodeContext) fs = require('fs');
-			else throw new TypeError('fs must be a defined object');
-		}
-		if (pathJoin){
-			if (typeof pathJoin != 'function') throw new TypeError('when defined, pathJoin must be a function');
-		} else pathJoin = _pathJoin; //Use local implementation as fallback
 
 		var rootKey;
 		var collectionIndex;
