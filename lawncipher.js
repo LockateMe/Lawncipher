@@ -25,12 +25,21 @@
 
 	var initCalled = false;
 	var fs, pathJoin;
+	var randomBuffer
 
 	//Adding an init method when not running in Node or in one of its derivatives
 	if (!nodeContext){
 		pathJoin = _pathJoin;
 
+		randomBuffer = function(size){
+			if (!(typeof size == 'number' && size > 0 && Math.floor(size) == size)) throw new TypeError('size must be a strictly positive integer');
+			var b = new Uint8Array(size);
+			window.crypto.getRandomValues(b);
+			return b;
+		};
+
 		exports.init = function(_fs){
+			if (initCalled) throw new Error('Lawncipher.init has already been called');
 			if (!(typeof _fs == 'object' && _fs != null)) throw new TypeError('_fs must be a non-null object');
 
 			fs = _fs;
@@ -40,6 +49,18 @@
 		initCalled = true; //Init call not needed (and not possible) outside of Nodejs
 		fs = require('fs');
 		pathJoin = require('path').join;
+
+		var crypto = require('crypto');
+
+		randomBuffer = function(size){
+			if (!(typeof size == 'number' && size > 0 && Math.floor(size) == size)) throw new TypeError('size must be a strictly positive integer');
+			var rand = crypto.randomBytes(size);
+
+			var ab = new ArrayBuffer(rand.length);
+			var ua = new Uint8Array(ab);
+			for (var i = 0; i < rand.length; i++) ua[i] = rand[i];
+			return ua;
+		}
 	}
 
 	if (!sodium) throw new Error('Error on loading Lawncipher : Libsodium is missing');
@@ -1881,13 +1902,6 @@
 	// Logical XOR
 	function xor(a, b){
 		return (a && !b) || (!a && b);
-	}
-
-	function randomBuffer(size){
-		if (!(typeof size == 'number' && size > 0 && Math.floor(size) == size)) throw new TypeError('size must be a strictly positive integer');
-		var b = new Uint8Array(size);
-		window.crypto.getRandomValues(b);
-		return b;
 	}
 
 	/***********************************************************
