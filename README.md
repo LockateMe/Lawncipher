@@ -1,5 +1,6 @@
 # Lawncipher
 
+__NOTE:__ This library is being adapted to work both in Nodejs and Cordova/Phonegap. It is not yet ready for use.
 
 Lawnchair-inspired libsodium-backed encrypted persistent document storage
 
