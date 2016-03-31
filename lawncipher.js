@@ -25,10 +25,14 @@
 
 	var initCalled = false;
 	var fs, pathJoin;
-	var randomBuffer
+	var randomBuffer; //Holds a reference to a function that generates a given number of pseudo random bytes. Implementation depends on context
+	var checkWriteBuffer, checkReadBuffer; //Holds references to functions that we are writing and reading files with the right type of buffer (Uint8Array vs Buffer, depending on context, again)
 
 	//Adding an init method when not running in Node or in one of its derivatives
 	if (!nodeContext){
+		/******************
+		* NON-NODE CONTEXT
+		*******************/
 		pathJoin = _pathJoin;
 
 		randomBuffer = function(size){
@@ -36,6 +40,16 @@
 			var b = new Uint8Array(size);
 			window.crypto.getRandomValues(b);
 			return b;
+		};
+
+		checkReadBuffer = function(b){
+			if (b instanceof Uint8Array) return b;
+			else throw new TypeError('The the read buffer variable must be a Uint8Array instance');
+		};
+
+		checkWriteBuffer = function(b){
+			if (b instanceof Uint8Array || typeof b == 'string') return b;
+			else throw new TypeError('The buffer to be written must be a Uint8Array or a string')
 		};
 
 		exports.init = function(_fs){
@@ -46,20 +60,45 @@
 			initCalled = true;
 		};
 	} else {
+		/******************
+		* NODE CONTEXT
+		*******************/
 		initCalled = true; //Init call not needed (and not possible) outside of Nodejs
 		fs = require('fs');
 		pathJoin = require('path').join;
 
 		var crypto = require('crypto');
+		var Buffer = require('buffer').Buffer;
 
 		randomBuffer = function(size){
 			if (!(typeof size == 'number' && size > 0 && Math.floor(size) == size)) throw new TypeError('size must be a strictly positive integer');
 			var rand = crypto.randomBytes(size);
 
-			var ab = new ArrayBuffer(rand.length);
+			return bufToUI8(rand);
+		};
+
+		checkReadBuffer = function(b){
+			if (typeof b == 'string') return b;
+			else if (Buffer.isBuffer(b)) return bufToUI8(b);
+			else throw new TypeError('b must be a string or a buffer');
+		};
+
+		checkWriteBuffer = function(b){
+			if (typeof b == 'string') return b;
+			else if (b instanceof Uint8Array) return UI8ToBuf(b);
+			else throw new TypeError('b must be a string or a Uint8Array');
+		};
+
+		function bufToUI8(b){
+			if (!Buffer.isBuffer(b)) throw new TypeError('b must be a buffer');
+			var ab = new ArrayBuffer(b.length);
 			var ua = new Uint8Array(ab);
-			for (var i = 0; i < rand.length; i++) ua[i] = rand[i];
+			for (var i = 0; i < b.length; i++) ua[i] = b[i];
 			return ua;
+		}
+
+		function UI8ToBuf(ui8){
+			return new Buffer(ui8);
 		}
 	}
 
@@ -148,6 +187,8 @@
 								return;
 							}
 
+							collectionIndexBuffer = checkReadBuffer(collectionIndexBuffer);
+
 							var collectionIndexStr;
 							try {
 								collectionIndexStr = cryptoFileEncoding.decrypt(collectionIndexBuffer, rootKey);
@@ -171,7 +212,7 @@
 							}
 							collectionIndex = _collectionIndex;
 							setTimeout(loadCollections, 0);
-						}, true);
+						}, 'binary');
 					} else {
 						collectionIndex = [];
 						saveIndex(callback);
@@ -375,6 +416,7 @@
 			var collectionIndexStr = JSON.stringify(collectionIndex);
 			var fileSalt = randomBuffer(16); //Placeholder salt. The real one is the one in the identity key file
 			var encryptedIndexBuffer = cryptoFileEncoding.encrypt(from_string(collectionIndexStr), rootKey, fileSalt);
+			encryptedIndexBuffer = checkWriteBuffer(encryptedIndexBuffer);
 			fs.writeFile(collectionIndexPath, encryptedIndexBuffer, cb);
 		}
 
@@ -447,7 +489,7 @@
 								}
 
 								//var encryptedFileBuffer = from_base64(data);
-								var encryptedFileBuffer = data;
+								var encryptedFileBuffer = checkReadBuffer(data);
 								collectionIndexSize = data.length;
 								if (encryptedFileBuffer.length < minFileSize){
 									console.error('Error while reading index file for collection ' + collectionName + ': invalid file size');
@@ -523,7 +565,7 @@
 									purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue)
 									cb(undefined, self);
 								}
-							}, true);
+							}, 'binary');
 						}
 
 						setTimeout(l, 0);
@@ -1159,6 +1201,7 @@
 				var docsIndexFile = concatBuffers([nonceBuffer, docsIndexCipher]);
 				collectionIndexSize = docsIndexFile.length;
 				//var docsIndexFileStr = to_base64(docsIndexFile, true);
+				docsIndexFile = checkWriteBuffer(docsIndexFile);
 				fs.writeFile(indexFilePath, docsIndexFile, cb);
 			}
 
@@ -1469,7 +1512,7 @@
 								_cb(err);
 								return;
 							}
-							fs.writeFile(docFilePath, finalFileData, function(err){
+							fs.writeFile(docFilePath, checkWriteBuffer(finalFileData), function(err){
 								if (err) _cb(err);
 								else {
 									_cb(undefined, docId);
@@ -1558,7 +1601,7 @@
 								return;
 							}
 							//var fileDataBuffer = from_base64(data);
-							var fileDataBuffer = data;
+							var fileDataBuffer = checkReadBuffer(data);
 							if (fileDataBuffer.length < minFileSize){
 								cb('INVALID_BLOB');
 								return;
@@ -1602,7 +1645,7 @@
 								//What?
 							}
 							cb(undefined, result);
-						}, true);
+						}, 'binary');
 					});
 				} else cb(undefined, clone(doc.index));
 			}
