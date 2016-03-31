@@ -30,6 +30,8 @@
     "grunt-jsvalidate": "^0.2.2"
   },
   "dependencies": {
-    "libsodium-wrappers": "^0.2.12"
+    "libsodium-wrappers": "^0.2.12",
+    "mkdirp": "^0.5.1",
+    "rmdir": "^1.2.0"
   }
 }

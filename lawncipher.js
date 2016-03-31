@@ -24,7 +24,7 @@
 }(this, function(exports, sodium, console, nodeContext, require, window){
 
 	var initCalled = false;
-	var fs, pathJoin;
+	var fs, pathJoin, rmdirr, mkdirp;
 	var randomBuffer; //Holds a reference to a function that generates a given number of pseudo random bytes. Implementation depends on context
 	var checkWriteBuffer, checkReadBuffer; //Holds references to functions that we are writing and reading files with the right type of buffer (Uint8Array vs Buffer, depending on context, again)
 
@@ -57,6 +57,10 @@
 			if (!(typeof _fs == 'object' && _fs != null)) throw new TypeError('_fs must be a non-null object');
 
 			fs = _fs;
+
+			rmdirr = fs.rmdirr;
+			mkdirp = fs.mkdirp;
+			
 			initCalled = true;
 		};
 	} else {
@@ -66,6 +70,8 @@
 		initCalled = true; //Init call not needed (and not possible) outside of Nodejs
 		fs = require('fs');
 		pathJoin = require('path').join;
+		mkdirp = require('mkdirp');
+		rmdirr = require('rmdir');
 
 		var crypto = require('crypto');
 		var Buffer = require('buffer').Buffer;
@@ -163,7 +169,7 @@
 			//Checking wether the root folder exists. Creating it otherwise. Loading main lawncipher `_index` file
 			fs.exists(rootPath, function(exists){
 				if (!exists){
-					fs.mkdirp(rootPath, function(err){
+					mkdirp(rootPath, function(err){
 						if (err){
 							console.error('Error while creating root folder for lawnchiper: ' + err);
 							callback(err);
@@ -383,7 +389,7 @@
 
 			//Recursively deleting the collection's folder
 			var docsPath = pathJoin(rootPath, collectionName);
-			fs.rmdirr(docsPath, function(err){
+			rmdirr(docsPath, function(err){
 				if (err){
 					console.error('Error while dropping documents files of collection ' + collectionName + ': ' + err);
 					callback(err);
@@ -577,7 +583,7 @@
 							documentsIndex = newDocumentsIndex;
 							serializedIndex = clone(documentsIndex);
 
-							fs.mkdirp(collectionPath, function(err){
+							mkdirp(collectionPath, function(err){
 								if (err){
 									cb(err);
 									return;
