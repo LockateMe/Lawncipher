@@ -2100,11 +2100,3 @@
 	}
 
 }));
-
-/*(function(window){
-
-	var console = window.console;
-	var sodium = window.sodium;
-
-
-})(window);*/
