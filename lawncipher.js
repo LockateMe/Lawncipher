@@ -23,8 +23,9 @@
 
 }(this, function(exports, sodium, console, nodeContext, require, window){
 
-	var initCalled = false;
-	var fs, pathJoin, rmdirr, mkdirp;
+	var initCalled = false; //Initialization flag
+	var fs; //FileSystem reference. Depends on context
+	var pathJoin, rmdirr, mkdirp, fsExists; //Reference to "special case" fs methods, whose implementations are not always present/part of the fs library that we have. Populated in the if(nodeContext) below
 	var randomBuffer; //Holds a reference to a function that generates a given number of pseudo random bytes. Implementation depends on context
 	var checkWriteBuffer, checkReadBuffer; //Holds references to functions that we are writing and reading files with the right type of buffer (Uint8Array vs Buffer, depending on context, again)
 
@@ -52,6 +53,8 @@
 			else throw new TypeError('The buffer to be written must be a Uint8Array or a string')
 		};
 
+		fsExists = fs.exists;
+
 		exports.init = function(_fs){
 			if (initCalled) throw new Error('Lawncipher.init has already been called');
 			if (!(typeof _fs == 'object' && _fs != null)) throw new TypeError('_fs must be a non-null object');
@@ -60,7 +63,7 @@
 
 			rmdirr = fs.rmdirr;
 			mkdirp = fs.mkdirp;
-			
+
 			initCalled = true;
 		};
 	} else {
@@ -69,12 +72,32 @@
 		*******************/
 		initCalled = true; //Init call not needed (and not possible) outside of Nodejs
 		fs = require('fs');
-		pathJoin = require('path').join;
+		var path = require('path');
 		mkdirp = require('mkdirp');
 		rmdirr = require('rmdir');
 
 		var crypto = require('crypto');
 		var Buffer = require('buffer').Buffer;
+
+		pathJoin = function(part1, part2){
+			if (Array.isArray(part1)){
+				if (part1.length == 0) return;
+
+				var totalPath = path.join.apply(this, part1);
+
+				if (part2){
+					//If part2 is defined, add it to part1 array
+					totalPath = path.join(totalPath, part2);
+				}
+				return totalPath;
+			}
+
+			return path.join(part1, part2);
+		}
+
+		fsExists = function(filePath, callback){
+			fs.access(filePath, fs.F_OK | fs.R_OK | fs.W_OK, function(err){callback(!err)});
+		};
 
 		randomBuffer = function(size){
 			if (!(typeof size == 'number' && size > 0 && Math.floor(size) == size)) throw new TypeError('size must be a strictly positive integer');
@@ -167,7 +190,7 @@
 			rootKey = _rootKey;
 
 			//Checking wether the root folder exists. Creating it otherwise. Loading main lawncipher `_index` file
-			fs.exists(rootPath, function(exists){
+			fsExists(rootPath, function(exists){
 				if (!exists){
 					mkdirp(rootPath, function(err){
 						if (err){
@@ -184,7 +207,7 @@
 
 			function loadMainIndex(){
 				//Checking whether the main `_index` file exists.
-				fs.exists(collectionIndexPath, function(exists){
+				fsExists(collectionIndexPath, function(exists){
 					if (exists){
 						fs.readFile(collectionIndexPath, function(err, collectionIndexBuffer){
 							if (err){
@@ -484,7 +507,7 @@
 			} else loadDocumentsIndex();
 
 			function loadDocumentsIndex(){
-				fs.exists(indexFilePath, function(indexExists){
+				fsExists(indexFilePath, function(indexExists){
 					if (indexExists){
 						function l(){ //Load existing index
 							fs.readFile(indexFilePath, function(err, data){
@@ -1514,7 +1537,7 @@
 
 					function writeBlob(){
 						fs.unlink(docFilePath, function(err){ //Deleting the blob file, if there is one. Basically, ensuring an overwrite
-							if (err){
+							if (err && !(err.code && typeof err.code == 'string' && err.code == 'ENOENT')){ //If there is an error, and it's not because a file doesn't exists : pass error through callback
 								_cb(err);
 								return;
 							}
@@ -1596,7 +1619,7 @@
 
 				if (doc.k){
 					var docFilePath = pathJoin([rootPath, collectionName, docId]);
-					fs.exists(docFilePath, function(blobExists){
+					fsExists(docFilePath, function(blobExists){
 						if (!blobExists){
 							cb('Encrypted blob cannot be found');
 							return;
