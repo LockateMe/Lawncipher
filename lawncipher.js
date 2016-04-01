@@ -94,9 +94,13 @@
 			return path.join(part1, part2);
 		}
 
-		fsExists = function(filePath, callback){
-			fs.access(filePath, fs.F_OK | fs.R_OK | fs.W_OK, function(err){callback(!err)});
-		};
+		if (fs.access){
+			fsExists = function(filePath, callback){
+				fs.access(filePath, fs.F_OK | fs.R_OK | fs.W_OK, function(err){callback(!err)});
+			};
+		} else {
+			fsExists = fs.exists;
+		}
 
 		randomBuffer = function(size){
 			if (!(typeof size == 'number' && size > 0 && Math.floor(size) == size)) throw new TypeError('size must be a strictly positive integer');
