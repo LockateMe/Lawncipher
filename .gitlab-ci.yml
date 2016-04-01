@@ -1,0 +1,15 @@
+before_script:
+  - "npm install"
+
+stages:
+  - test
+
+check_v0_10:
+  script: "node test.js"
+  stage: test
+
+check_v5:
+  script: "node test.js"
+  stage: test
+  tags:
+    - v5
