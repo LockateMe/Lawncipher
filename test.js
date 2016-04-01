@@ -1,23 +1,102 @@
-(function (LockateMeTests, window){
+(function(root, factory){
+	var _nodeContext = false;
+	if (typeof process === 'object' && process != null){
+		_nodeContext = true;
+	}
 
-	function testLawncipher(fs){
-		if (!window.Lawncipher) throw new Error('lawncipher not defined');
-		if (!fs) throw new Error('fs not defined');
+	if (typeof define === 'function' && define.amd){
+		define(['exports', 'Lawncipher', 'console', _nodeContext.toString(), 'require', 'window'], factory);
+	} else if (typeof exports !== 'undefined'){
+		factory(exports, require('./lawncipher.js'), console, _nodeContext, require, !_nodeContext ? window : undefined);
+	} else {
+		var cb = root.LawncipherTest && root.LawncipherTest.onload;
+		factory((root.LawncipherTest = {}), Lawncipher, console, _nodeContext, typeof require != 'undefined' && require, !_nodeContext ? window : undefined);
+		if (typeof cb == 'function'){
+			cb(root.LawncipherTest);
+		}
+	}
 
-		var console = window.console;
-		var Lawncipher = window.Lawncipher;
+	if (_nodeContext) runNodeTests();
 
-		var dbPath = 'test_db';
-		var db = new Lawncipher.db(dbPath);
-		var collections = {};
-		var docs = {};
+	function runNodeTests(){
+		if (!module.parent){
+			var path = require('path');
+			var mkdirp = require('mkdirp');
 
-		function randomBuffer(size){
+			var testPath = path.join(__dirname, 'test_db');
+
+			mkdirp(testPath, function(err){
+				if (err){
+					console.error('Error while creating test_db directory: ' + err);
+					process.exit(1);
+				}
+
+				exports.test(testPath, undefined, function(){
+					console.log('Lawncipher works in Node.js! Yeeaaaah');
+				});
+			});
+		}
+	}
+}(this, function(exports, Lawncipher, console, nodeContext, require, window){
+
+	var fs;
+	var randomBuffer;
+	var rmdirr;
+
+	if (nodeContext){
+		fs = require('fs');
+		rmdirr = require('rmdir');
+
+		var crypto = require('crypto');
+		var Buffer = require('buffer').Buffer;
+
+		randomBuffer = function(size){
+			if (!(typeof size == 'number' && size > 0 && Math.floor(size) == size)) throw new TypeError('size must be a strictly positive integer');
+			var rand = crypto.randomBytes(size);
+
+			return bufToUI8(rand);
+		};
+
+		function bufToUI8(b){
+			if (!Buffer.isBuffer(b)) throw new TypeError('b must be a buffer');
+			var ab = new ArrayBuffer(b.length);
+			var ua = new Uint8Array(ab);
+			for (var i = 0; i < b.length; i++) ua[i] = b[i];
+			return ua;
+		}
+
+		function UI8ToBuf(ui8){
+			return new Buffer(ui8);
+		}
+
+	} else {
+
+		randomBuffer = function(size){
 			if (!(typeof size == 'number' && size > 0 && Math.floor(size) == size)) throw new TypeError('size must be a strictly positive integer');
 			var b = new Uint8Array(size);
 			window.crypto.getRandomValues(b);
 			return b;
-		}
+		};
+
+	}
+
+	exports.test = function(testPath, _fs, finalCallback){
+
+		fs = _fs || fs;
+
+		if (!fs) throw new Error('No file system has been provided for this test');
+
+		if (!nodeContext) rmdirr = fs.rmdirr;
+
+		var dbPath = testPath || 'test_db';
+
+		if (!nodeContext) Lawncipher.init(fs);
+
+		if (finalCallback && typeof finalCallback != 'function') throw new TypeErorr('when defined, final callback must be a function');
+
+		var db = new Lawncipher.db(dbPath);
+		var collections = {};
+		var docs = {};
 
 		var userA = {
 			firstName: 'A',
@@ -811,7 +890,7 @@
 			doOne();
 		}
 
-		fs.rmdirr(dbPath, function(err){
+		rmdirr(dbPath, function(err){
 			if (err){
 				console.error('Error while deleting any existing test database');
 				console.error(err);
@@ -820,6 +899,7 @@
 
 			queue(tasks, function(){
 				console.log('All lawncipher tests completed with success!');
+				if (finalCallback) finalCallback();
 			});
 		});
 
@@ -869,8 +949,6 @@
 			return (a && !b) || (!a && b);
 		}
 
-	}
+	};
 
-	LockateMeTests.lawncipher = testLawncipher;
-
-})(window.LockateMeTests = window.LockateMeTests || {}, window);
+}));

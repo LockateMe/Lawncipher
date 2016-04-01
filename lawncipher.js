@@ -53,14 +53,13 @@
 			else throw new TypeError('The buffer to be written must be a Uint8Array or a string')
 		};
 
-		fsExists = fs.exists;
-
 		exports.init = function(_fs){
 			if (initCalled) throw new Error('Lawncipher.init has already been called');
 			if (!(typeof _fs == 'object' && _fs != null)) throw new TypeError('_fs must be a non-null object');
 
 			fs = _fs;
 
+			fsExists = fs.exists;
 			rmdirr = fs.rmdirr;
 			mkdirp = fs.mkdirp;
 
@@ -241,7 +240,7 @@
 							}
 							collectionIndex = _collectionIndex;
 							setTimeout(loadCollections, 0);
-						}, 'binary');
+						});
 					} else {
 						collectionIndex = [];
 						saveIndex(callback);
@@ -594,7 +593,7 @@
 									purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue)
 									cb(undefined, self);
 								}
-							}, 'binary');
+							});
 						}
 
 						setTimeout(l, 0);
@@ -1674,7 +1673,7 @@
 								//What?
 							}
 							cb(undefined, result);
-						}, 'binary');
+						});
 					});
 				} else cb(undefined, clone(doc.index));
 			}
