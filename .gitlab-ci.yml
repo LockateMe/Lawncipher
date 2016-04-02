@@ -7,6 +7,8 @@ stages:
 check_v0_10:
   script: "node test.js"
   stage: test
+  tags:
+    - v0_10
 
 check_v5:
   script: "node test.js"
