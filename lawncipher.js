@@ -23,7 +23,6 @@
 
 }(this, function(exports, sodium, console, nodeContext, require, window){
 
-	var initCalled = false; //Initialization flag
 	var fs; //FileSystem reference. Depends on context
 	var pathJoin, rmdirr, mkdirp, fsExists; //Reference to "special case" fs methods, whose implementations are not always present/part of the fs library that we have. Populated in the if(nodeContext) below
 	var randomBuffer; //Holds a reference to a function that generates a given number of pseudo random bytes. Implementation depends on context
@@ -52,24 +51,10 @@
 			if (b instanceof Uint8Array || typeof b == 'string') return b;
 			else throw new TypeError('The buffer to be written must be a Uint8Array or a string')
 		};
-
-		exports.init = function(_fs){
-			if (initCalled) throw new Error('Lawncipher.init has already been called');
-			if (!(typeof _fs == 'object' && _fs != null)) throw new TypeError('_fs must be a non-null object');
-
-			fs = _fs;
-
-			fsExists = fs.exists;
-			rmdirr = fs.rmdirr;
-			mkdirp = fs.mkdirp;
-
-			initCalled = true;
-		};
 	} else {
 		/******************
 		* NODE CONTEXT
 		*******************/
-		initCalled = true; //Init call not needed (and not possible) outside of Nodejs
 		fs = require('fs');
 		var path = require('path');
 		mkdirp = require('mkdirp');
@@ -162,10 +147,18 @@
 
 	exports.db = Lawncipher;
 
-	function Lawncipher(rootPath){
-		if (!initCalled) throw new TypeError('Lawncipher.init must be called before a Lawncipher.db can be initialized');
-
+	function Lawncipher(rootPath, _fs){
 		if (!(typeof rootPath == 'string' && rootPath.length > 0)) throw new TypeError('rootPath must be a non-null string');
+
+		if (!nodeContext){
+			if (!(_fs && typeof _fs == 'object')) throw new TypeError('_fs must be defined and must be an object');
+
+			fs = _fs;
+
+			fsExists = fs.exists;
+			rmdirr = fs.rmdirr;
+			mkdirp = fs.mkdirp;
+		}
 
 		var rootKey;
 		var collectionIndex;

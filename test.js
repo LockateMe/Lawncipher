@@ -90,11 +90,9 @@
 
 		var dbPath = testPath || 'test_db';
 
-		if (!nodeContext) Lawncipher.init(fs);
-
 		if (finalCallback && typeof finalCallback != 'function') throw new TypeErorr('when defined, final callback must be a function');
 
-		var db = new Lawncipher.db(dbPath);
+		var db = new Lawncipher.db(dbPath, fs);
 		var collections = {};
 		var docs = {};
 

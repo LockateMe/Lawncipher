@@ -10,9 +10,10 @@ Building a rather versatile and persistent encrypted document storage.
 
 ## API
 
-### `Lawncipher(rootPath)`
+### `new Lawncipher.db(rootPath, [fs])`
 Constructor method
 * `String rootPath` : root Lawncipher directory path
+* `Object fs` : The filesystem object to be used by the Lawncipher instance. Required when running in Cordova; the instance must come from [cordova-plugin-file-node-like](https://github.com/LockateMe/cordova-plugin-file-node-like)
 
 ### `Lawncipher.open(rootKey, callback)`
 Open the Lawncipher document store
