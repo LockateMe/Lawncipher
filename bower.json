@@ -29,5 +29,8 @@
     "bower_components",
     "test",
     "tests"
-  ]
+  ],
+  "dependencies": {
+    "libsodium.js": "~0.2.12"
+  }
 }
