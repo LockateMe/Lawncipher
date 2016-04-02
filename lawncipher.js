@@ -220,7 +220,13 @@
 								collectionIndexStr = to_string(collectionIndexStr);
 							} catch (e){
 								rootKey = undefined;
-								callback('INVALID_ROOTKEY');
+
+								var errMsg;
+								if (typeof e == 'string') errMsg = e;
+								else if (typeof e == 'object') errMsg = e.message || e;
+								else errMsg = e;
+
+								callback(errMsg);
 								return;
 							}
 
@@ -1981,6 +1987,7 @@
 	***********************************************************/
 
 	/* Encrypted buffer format. Numbers are in big endian
+	* 1 byte : file/db format version number
 	* 2 bytes : r (unsigned short)
 	* 2 bytes : p (unsigned short)
 	* 4 bytes : opsLimit (unsigned long)
@@ -1992,7 +1999,7 @@
 	* x bytes : encrypted data buffer (with MAC appended to it)
 	*/
 
-	function scryptFileEncode(buffer, rootKey, salt, opsLimit, r, p){
+	function scryptFileEncode(buffer, rootKey, salt, opsLimit, r, p, fileFormatVersion){
 		if (!(buffer && buffer instanceof Uint8Array)) throw new TypeError('Buffer must be a Uint8Array');
 		if (!(typeof rootKey == 'string' || rootKey instanceof Uint8Array)) throw new TypeError('rootKey must be a string or a Uint8Array buffer');
 		if (!(typeof salt == 'string' || salt instanceof Uint8Array)) throw new TypeError('salt must be a string or a Uint8Array buffer');
@@ -2004,17 +2011,24 @@
 		r = r || 8;
 		p = p || 1;
 
+		fileFormatVersion = fileFormatVersion || 0x00;
+
 		if (!(typeof opsLimit == 'number' && Math.floor(opsLimit) == opsLimit && opsLimit > 0)) throw new TypeError('when defined, opsLimit must be a strictly positive integer number');
 		if (!(typeof r == 'number' && Math.floor(r) == r && r > 0)) throw new TypeError('when defined, r must be a strictly positive integer number');
 		if (!(typeof p == 'number' && Math.floor(p) == p && p > 0)) throw new TypeError('when defined, p must be a strictly positive integer number');
 
+		if (!(typeof fileFormatVersion == 'number' && Math.floor(fileFormatVersion) == fileFormatVersion && fileFormatVersion >= 0 && fileFormatVersion <= 255)) throw new TypeError('when provided, fileFormatVersion must be a byte');
+
 		var saltSize = salt.length;
 		var nonceSize = sodium.crypto_secretbox_NONCEBYTES;
-		var totalSize = 16 + saltSize + nonceSize + buffer.length + sodium.crypto_secretbox_MACBYTES;
+		var totalSize = 17 + saltSize + nonceSize + buffer.length + sodium.crypto_secretbox_MACBYTES;
 
 		var b = new Uint8Array(totalSize);
 		var bIndex = 0;
 
+		//Writing file/db format version number
+		b[bIndex] = fileFormatVersion;
+		bIndex++;
 		//Writing r and p
 		b[bIndex] = (r >> 8);
 		b[bIndex+1] = r;
@@ -2072,7 +2086,12 @@
 
 		//Decrypting the ciphertext
 		//console.log('Ciphertext: ' + to_hex(cipherText));
-		var plainText = sodium.crypto_secretbox_open_easy(headerData.cipher, headerData.nonce, rootKey);
+		var plainText;
+		try {
+			plainText = sodium.crypto_secretbox_open_easy(headerData.cipher, headerData.nonce, rootKey);
+		} catch (e){
+			throw 'INVALID_ROOTKEY';
+		}
 		//console.log('Key plain text:' + to_hex(plainText));
 		return plainText; //If returned result is undefined, then invalid rootKey (or corrupted buffer)
 	}
@@ -2080,13 +2099,21 @@
 	function scryptFileDecodeHeader(buffer){
 		if (!(buffer && buffer instanceof Uint8Array)) throw new TypeError('buffer must be a Uint8Array buffer');
 
-		var minRemainingSize = 16; //16 bytes from the above format description
+		var minRemainingSize = 17; //17 bytes from the above format description
 
 		if (in_avail() < minRemainingSize) throw new RangeError('Invalid encrypted buffer format');
 
+		var fileFormatVersion = 0;
 		var r = 0, p = 0, opsLimit = 0, saltSize = 0, nonceSize = 0, encBufferSize = 0;
 		var opsLimitBeforeException = 4194304;
 		var rIndex = 0;
+
+		//Reading file format version number
+		fileFormatVersion = buffer[rIndex];
+		rIndex++;
+		minRemainingSize--;
+
+		if (fileFormatVersion != 0x00) throw new Error('Unsupported file format version: ' + fileFormatVersion + '. Please use a newer version of Lawncipher');
 
 		//Reading r
 		r = (buffer[rIndex] << 8) + buffer[rIndex+1];
@@ -2162,7 +2189,7 @@
 		rIndex += encBufferSize;
 		minRemainingSize -= encBufferSize;
 
-		return {r: r, p: p, N: opsLimit, salt: salt, nonce: nonce, cipher: cipherText};
+		return {fileFormatVersion: fileFormatVersion, r: r, p: p, N: opsLimit, salt: salt, nonce: nonce, cipher: cipherText};
 
 		function in_avail(){return buffer.length - rIndex;}
 	}
