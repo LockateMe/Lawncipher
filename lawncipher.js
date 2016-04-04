@@ -27,6 +27,7 @@
 	var pathJoin, rmdirr, mkdirp, fsExists; //Reference to "special case" fs methods, whose implementations are not always present/part of the fs library that we have. Populated in the if(nodeContext) below
 	var randomBuffer; //Holds a reference to a function that generates a given number of pseudo random bytes. Implementation depends on context
 	var checkWriteBuffer, checkReadBuffer; //Holds references to functions that we are writing and reading files with the right type of buffer (Uint8Array vs Buffer, depending on context, again)
+	var scryptProv, scryptProvAsync;
 
 	//Adding an init method when not running in Node or in one of its derivatives
 	if (!nodeContext){
@@ -145,6 +146,41 @@
 
 	var indexNamesRegex = /^_index(?:\d+)?$/g;
 
+	/*
+	* Scrypt provider must have the following interface
+	* Uint8Array|String password
+	* Uint8Array|String salt
+	* Number opsLimit
+	* Number r
+	* Number p
+	* Number keyLength
+	* Function callback(err, derivedKey) : optional. _async must be set to true when calling setScryptProvider with such function
+	*/
+	function setScryptProvider(_scryptProvider, _async){
+		if (!_scryptProvider) throw new TypeError('_scryptProvider must be defined');
+		if (!(typeof _scryptProvider == 'function' || typeof _scryptProvider == 'string')) throw new TypeError('_scryptProvider must either be a function or a string');
+		if (typeof _scryptProvider == 'string'){
+			_scryptProvider = _scryptProvider.toLowerCase();
+			if (_scryptProvider == 'default' || _scryptProvider == 'reset'){
+				setDefaultScryptProvider();
+			} else {
+				throw new Error('Unsupported scryptProvider value: ' + _scryptProvider);
+			}
+		} else {
+			scryptProv = _scryptProvider;
+			scryptProvAsync = _async;
+		}
+	}
+
+	function setDefaultScryptProvider(){
+		scryptProvAsync = false;
+		scryptProv = sodium.crypto_pwhash_scryptsalsa208sha256_ll;
+	}
+
+	setDefaultScryptProvider();
+
+	exports.setScryptProvider = setScryptProvider;
+
 	exports.db = Lawncipher;
 
 	function Lawncipher(rootPath, _fs){
@@ -160,20 +196,15 @@
 			mkdirp = fs.mkdirp;
 		}
 
-		var rootKey;
-		var collectionIndex;
-		var collectionIndexPath = pathJoin(rootPath, '_index');
+		var rootKey, rootSalt;
+		var rootIndex;
+		var rootIndexPath = pathJoin(rootPath, '_index');
 
 		var openCollections = [];
 
 		var lc = this;
 
-		/**
-		* Open the lawncipher document store
-		* @param {String} _rootKey - the root key from which each collection's main encryption key will be derived. If lawncipher is empty, the provided rootKey will be set; if it isn't empty, it has to match the rootKey that was provided on creation
-		* @param {Function} callback - callback function. Receiving only an `err` (error) parameter (a string)
-		*/
-		this.open = function(_rootKey, callback){
+		function openLawncipher(_rootKey, callback, rootIndexHeader){
 			if (!_rootKey) return false; //No root key provided
 			if (rootKey) return false; //Already open
 			if (typeof callback != 'function') throw new Error('callback must be a function');
@@ -181,6 +212,13 @@
 			if (!(_rootKey instanceof Uint8Array && _rootKey.length == sodium.crypto_secretbox_KEYBYTES)){
 				callback(new Error('rootKey must be an Uint8Array and ' + sodium.crypto_secretbox_KEYBYTES + ' bytes long'));
 				return;
+			}
+
+			if (rootIndexHeader){
+				//Checking that it's an object
+				if (typeof rootIndexHeader != 'object') throw new TypeError('when defined, rootIndexHeader must be an object');
+				//Checking rootIndexHeader's attributes
+				scryptCheckFileHeader(rootIndexHeader);
 			}
 
 			rootKey = _rootKey;
@@ -194,30 +232,30 @@
 							callback(err);
 							return;
 						}
-						setTimeout(loadMainIndex, 0);
+						setTimeout(loadRootIndex, 0);
 					});
 				} else {
-					setTimeout(loadMainIndex, 0);
+					setTimeout(loadRootIndex, 0);
 				}
 			});
 
-			function loadMainIndex(){
+			function loadRootIndex(){
 				//Checking whether the main `_index` file exists.
-				fsExists(collectionIndexPath, function(exists){
+				fsExists(rootIndexPath, function(exists){
 					if (exists){
-						fs.readFile(collectionIndexPath, function(err, collectionIndexBuffer){
+						fs.readFile(rootIndexPath, function(err, rootIndexBuffer){
 							if (err){
-								console.error('Error while reading the collectionIndex file');
+								console.error('Error while reading the rootIndex file: ' + err);
 								callback(err);
 								return;
 							}
 
-							collectionIndexBuffer = checkReadBuffer(collectionIndexBuffer);
+							rootIndexBuffer = checkReadBuffer(rootIndexBuffer);
 
-							var collectionIndexStr;
+							var rootIndexStr;
 							try {
-								collectionIndexStr = cryptoFileEncoding.decrypt(collectionIndexBuffer, rootKey);
-								collectionIndexStr = to_string(collectionIndexStr);
+								rootIndexStr = cryptoFileEncoding.decrypt(rootIndexBuffer, rootKey, rootIndexHeader);
+								rootIndexStr = to_string(rootIndexStr);
 							} catch (e){
 								rootKey = undefined;
 
@@ -230,31 +268,34 @@
 								return;
 							}
 
-							var _collectionIndex;
+							var _rootIndex;
 							try {
-								_collectionIndex = JSON.parse(collectionIndexStr);
+								_rootIndex = JSON.parse(rootIndexStr);
 							} catch (e){
 								callback('INVALID_INDEX');
 								return;
 							}
-							if (!Array.isArray(_collectionIndex)){
+							if (!Array.isArray(_rootIndex)){
 								callback('INVALID_INDEX');
 								return;
 							}
-							collectionIndex = _collectionIndex;
+							rootIndex = _rootIndex;
 							setTimeout(loadCollections, 0);
 						});
 					} else {
-						collectionIndex = [];
+						rootIndex = [];
+						//If we use Lawncipher.db.open(), a salt must be used (but it's just a placeholder)
+						//It is defined at this stage though if we use Lawncipher.db.openWithPassword()
+						if (!rootSalt) rootSalt = randomBuffer(16);
+						//Save the rootIndex on flash/disk
 						saveIndex(callback);
-						//fs.writeFile(collectionIndexPath, '[]', callback); //Creating it otherwise. If we are creating the root lawncipher index file, that means there no collections yet. Callback
 					}
 				});
 			}
 
 			//Loading collections. Or more precisely checking their description format. But why?
 			function loadCollections(){
-				if (collectionIndex.length == 0){
+				if (rootIndex.length == 0){
 					//console.log('No collection description to load');
 					callback();
 					return;
@@ -262,12 +303,13 @@
 
 				var endCount = 0;
 
-				for (var i = 0; i < collectionIndex.length; i++){
-					loadOne(collectionIndex[i]);
+				for (var i = 0; i < rootIndex.length; i++){
+					loadOne(rootIndex[i]);
 				}
 
 				function endLoad(){
-					if (endCount == collectionIndex.length){
+					endCount++;
+					if (endCount == rootIndex.length){
 						//console.log('Collections loaded');
 						callback();
 					}
@@ -286,21 +328,115 @@
 
 					//Default TTL parameter to be included here as well??
 
-					endCount++;
 					endLoad();
 					//Why async-like code when behavior is sync?
 				}
 			}
+		}
+
+		/**
+		* Save the root lawncipher index
+		* @private
+		* @param {Function} callback - callback function, receiving potential error messages as strings. If the provided value is not a function, the function silently returns
+		*/
+		function saveIndex(cb){
+			if (typeof cb != 'function') return;
+
+			var rootIndexStr = JSON.stringify(rootIndex);
+
+			var encryptedIndexBuffer = cryptoFileEncoding.encrypt(from_string(rootIndexStr), rootKey, rootSalt);
+			encryptedIndexBuffer = checkWriteBuffer(encryptedIndexBuffer);
+			fs.writeFile(rootIndexPath, encryptedIndexBuffer, cb);
+		}
+
+		function doScrypt(password, salt, opsLimit, r, p, keyLength, cb){
+			var agrsArray = Array.prototype.slice.call(arguments);
+
+			if (scryptProvAsync){
+				scryptProv.apply({}, argsArray);
+			} else {
+				var derivedKey;
+				try {
+					derivedKey = scryptProvider.apply({}, arguments.slice(0, 6));
+				} catch (e){
+					cb(e);
+					return;
+				}
+				cb(undefined, derivedKey);
+			}
+		}
+
+		/**
+		* Open the lawncipher document store
+		* @param {Uint8Array|String} _rootKey|_rootPassword - the root key or root password from which each collection's main encryption key will be derived. If lawncipher is empty, the provided rootKey will be set; if it isn't empty, it has to match the rootKey that was provided on creation
+		* @param {Function} callback - callback function. Receiving only an `err` (error) parameter (a string)
+		*/
+		this.open = function(_rootKey, callback){
+			openLawncipher(_rootKey, callback);
+		};
+
+		this.openWithPassword = function(rootPassword, callback){
+			if (!(typeof rootPassword == 'string' && rootPassword.length > 0)) throw new TypeError('rootPassword must be a non-empty string');
+			if (typeof callback != 'function') throw new TypeError('callback must be a function');
+
+			fsExists(rootIndexPath, function(exists){
+				if (!exists){
+					/*
+					*	If the root index file doesn't exist, then it will be created on the first openLawncipher call
+					*	We are generating here the salt that will be used to derive the password into the encryption key for the root index
+					*	This salt will be saved as part of the "root index" file format
+					*/
+					var passSalt = randomBuffer(16);
+					rootSalt = passSalt;
+
+					deriveAndOpen(rootPassword, rootSalt, callback);
+				} else {
+					/*
+					*	The root index file already exists. We are going to read the salt from it
+					*	And then derive the password into an encryption key
+					*/
+					fs.readFile(rootIndexPath, function(err, rootIndexFileBuffer){
+						if (err){
+							callback(err);
+							return;
+						}
+
+						var rootIndexContents;
+						try {
+							rootIndexContents = cryptoFileEncoding.scryptFileDecodeHeader(rootIndexFileBuffer);
+						} catch (e){
+							callback(e);
+							return;
+						}
+
+						rootSalt = rootIndexContents.salt;
+
+						deriveAndOpen(rootPassword, rootSalt, callback, rootIndexContents);
+					});
+				}
+			});
+
+			function deriveAndOpen(pass, salt, cb, rootIndexContents){
+				doScrypt(pass, salt, undefined, undefined, undefined, 32, function(err, derivedKey){
+					if (err){
+						cb(err);
+						return;
+					}
+
+					openLawncipher(derivedKey, cb, rootIndexContents);
+				});
+			}
+
 		};
 
 		/**
 		* Closing the lawncipher, if open
 		*/
 		this.close = function(){
-			//Trying to attract the GC's attention by setting the `rootKey` and `collectionIndex` to null
-			if (rootKey || collectionIndex){
+			//Trying to attract the GC's attention by setting the `rootKey` and `rootIndex` to null
+			if (rootKey || rootIndex){
 				rootKey = null;
-				collectionIndex = null;
+				rootIndex = null;
 			}
 			while (openCollections.length > 0){
 				openCollections[0].close();
@@ -313,7 +449,7 @@
 		* @returns {Boolean}
 		*/
 		this.isOpen = function(){
-			return !!(rootKey && collectionIndex);
+			return !!(rootKey && rootIndex);
 		};
 
 		/**
@@ -325,13 +461,37 @@
 			if (!(newRootKey && (newRootKey instanceof Uint8Array && newRootKey.length == sodium.crypto_secretbox_KEYBYTES))) throw new TypeError('newRootKey must be an Uint8Array and ' + sodium.crypto_secretbox_KEYBYTES + ' bytes long');
 			if (typeof callback != 'function') throw new TypeError('callback must be a function');
 
-			if (!(rootKey && collectionIndex)){
-				callback(new Error('lawncipher is not open yet'));
+			if (!(rootKey && rootIndex)){
+				callback(new Error('lawncipher is not currently open'));
 				return;
 			}
 
 			rootKey = newRootKey;
+			rootSalt = randomBuffer(16);
 			saveIndex(callback);
+		};
+
+		this.changePassword = function(newPassword, callback){
+			if (!(typeof newPassword == 'string' && newPassword.length > 0)) throw new TypeError('newPassword must be a non-empty string');
+			if (typeof callback != 'function') throw new TypeError('callback must be a function');
+
+			if (!(rootIndex && rootIndex)){
+				callback(new Error('lawncipher is not currently open'));
+				return;
+			}
+
+			var newSalt = randomBuffer(16);
+
+			doScrypt(newPassword, newSalt, undefined, undefined, undefined, 32, function(err, derivedKey){
+				if (err){
+					callback(err);
+					return;
+				}
+
+				rootKey = derivedKey;
+				rootSalt = newSalt;
+				saveIndex(callback);
+			});
 		};
 
 		/**
@@ -380,7 +540,7 @@
 			}
 
 			var collectionsNames = [];
-			for (var i = 0; i < collectionIndex.length; i++) collectionsNames.push(collectionIndex[i].name);
+			for (var i = 0; i < rootIndex.length; i++) collectionsNames.push(rootIndex[i].name);
 			_callback(undefined, collectionsNames);
 			return collectionsNames;
 		};
@@ -405,8 +565,8 @@
 			}
 
 			var collectionPosition;
-			for (var i = 0; i < collectionIndex.length; i++){
-				if (collectionIndex[i].name == collectionName){
+			for (var i = 0; i < rootIndex.length; i++){
+				if (rootIndex[i].name == collectionName){
 					collectionPosition = i;
 					break;
 				}
@@ -421,7 +581,7 @@
 					return;
 				}
 				//Removing the collection from the main index and saving it
-				collectionIndex.splice(collectionPosition, 1);
+				rootIndex.splice(collectionPosition, 1);
 				saveIndex(function(err){
 					if (err) console.error('Error while saving new collection index, after dropping collection ' + collectionName + ': ' + err);
 					callback(err);
@@ -429,27 +589,6 @@
 			});
 
 		};
-
-		/**
-		* Save the root lawncipher index
-		* @private
-		* @param {Function} callback - callback function, receiving potential error messages as strings. If the provided value is not a function, the function silently returns
-		*/
-		function saveIndex(cb){
-			if (typeof cb != 'function') return;
-			/*fs.unlink(collectionIndexPath, function(err){
-				if (err){
-					console.error('Error while deleting master (collections) index file: ' + err);
-					//cb(err);
-				}
-				fs.writeFile(collectionIndexPath, JSON.stringify(collectionIndex), cb);
-			});*/
-			var collectionIndexStr = JSON.stringify(collectionIndex);
-			var fileSalt = randomBuffer(16); //Placeholder salt. The real one is the one in the identity key file
-			var encryptedIndexBuffer = cryptoFileEncoding.encrypt(from_string(collectionIndexStr), rootKey, fileSalt);
-			encryptedIndexBuffer = checkWriteBuffer(encryptedIndexBuffer);
-			fs.writeFile(collectionIndexPath, encryptedIndexBuffer, cb);
-		}
 
 		/**
 		* Lawncipher Collection object constructor
@@ -482,9 +621,9 @@
 			var documentsIndex = null; //Decrypted, parsed and deserialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
 			var serializedIndex = null; //Decrypted, parsed and serialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
 
-			for (var i = 0; i < collectionIndex.length; i++){
-				if (collectionIndex[i].name == name){
-					collectionDescription = collectionIndex[i];
+			for (var i = 0; i < rootIndex.length; i++){
+				if (rootIndex[i].name == name){
+					collectionDescription = rootIndex[i];
 					break;
 				}
 			}
@@ -497,7 +636,7 @@
 
 				if (collectionIndexModel) collectionDescription.indexModel = clone(collectionIndexModel)
 
-				collectionIndex.push(collectionDescription);
+				rootIndex.push(collectionDescription);
 				saveIndex(function(err){
 					if (err){
 						cb(err);
@@ -2192,6 +2331,33 @@
 		return {fileFormatVersion: fileFormatVersion, r: r, p: p, N: opsLimit, salt: salt, nonce: nonce, cipher: cipherText};
 
 		function in_avail(){return buffer.length - rIndex;}
+	}
+
+	function scryptCheckFileHeader(fh){
+		if (typeof fh != 'object') throw new TypeError('fileHeader must be an object');
+		checkByte(fh.fileFormatVersion, 'fileHeader.fileFormatVersion');
+		checkUInt(fh.r, 'fileHeader.r');
+		checkUInt(fh.p, 'fileHeader.p');
+		checkUInt(fh.opsLimit, 'fileHeader.opsLimit');
+		checkBuffer(fh.salt, 'fileHeader.salt');
+		checkBufferWithLength(fh.nonce, sodium.crypto_secretbox_NONCEBYTES, 'fileHeader.nonce');
+		checkBuffer(fh.cipherText, 'fileHeader.cipherText');
+	}
+
+	function checkByte(n, varName){
+		if (!(typeof n == 'number' && Math.floor(n) == n && n >= 0 && n <= 255)) throw new TypeError(varName + ' must be an unsigned byte');
+	}
+
+	function checkUInt(n, varName){
+		if (!(typeof n == 'number' && Math.floor(n) == n && n >= 0)) throw new TypeError(varName + ' must be an unsigned integer number');
+	}
+
+	function checkBuffer(b, varName){
+		if (!(b instanceof Uint8Array && b.length > 0)) throw new TypeError(varName + ' must be a buffer (Uint8Array)');
+	}
+
+	function checkBufferWithLength(b, bLength, varName){
+		if (!(b instanceof Uint8Array && b.length == bLength)) throw new TypeError(varName + ' must be a buffer (Uint8Array), that is ' + bLength + ' bytes long');
 	}
 
 }));
