@@ -6,9 +6,7 @@
 	if (typeof process === 'object' && process != null){
 		_nodeContext = true;
 	}
-	/*if (typeof process === "object" && typeof process.stdout === "undefined") {
-		process.stderr = process.stdout = { write: console.log };
-	}*/
+
 	if (typeof define === 'function' && define.amd){
 		define(['exports', 'sodium', 'console', _nodeContext.toString(), 'require', 'window'], factory);
 	} else if (typeof exports !== 'undefined'){
@@ -288,15 +286,16 @@
 						//It is defined at this stage though if we use Lawncipher.db.openWithPassword()
 						if (!rootSalt) rootSalt = randomBuffer(16);
 						//Save the rootIndex on flash/disk
-						saveIndex(callback);
+						saveRootIndex(callback);
 					}
 				});
 			}
 
 			//Loading collections. Or more precisely checking their description format. But why?
 			function loadCollections(){
+				console.log('rootIndex: ' + JSON.stringify(rootIndex));
 				if (rootIndex.length == 0){
-					//console.log('No collection description to load');
+					console.log('No collection description to load');
 					callback();
 					return;
 				}
@@ -337,10 +336,10 @@
 		/**
 		* Save the root lawncipher index
 		* @private
-		* @param {Function} callback - callback function, receiving potential error messages as strings. If the provided value is not a function, the function silently returns
+		* @param {Function} callback - callback function, receiving potential error messages as strings. If the provided value is not a function, the function screams at you with an exception
 		*/
-		function saveIndex(cb){
-			if (typeof cb != 'function') return;
+		function saveRootIndex(cb){
+			if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
 			var rootIndexStr = JSON.stringify(rootIndex);
 
@@ -350,14 +349,19 @@
 		}
 
 		function doScrypt(password, salt, opsLimit, r, p, keyLength, cb){
-			var agrsArray = Array.prototype.slice.call(arguments);
+			opsLimit = opsLimit || 16384;
+			r = r || 8;
+			p = p || 1;
+			keyLength = keyLength || 32;
+
+			var argsArray = Array.prototype.slice.call(arguments);
 
 			if (scryptProvAsync){
 				scryptProv.apply({}, argsArray);
 			} else {
 				var derivedKey;
 				try {
-					derivedKey = scryptProvider.apply({}, arguments.slice(0, 6));
+					derivedKey = scryptProv.apply({}, argsArray.slice(0, 6));
 				} catch (e){
 					cb(e);
 					return;
@@ -403,7 +407,7 @@
 
 						var rootIndexContents;
 						try {
-							rootIndexContents = cryptoFileEncoding.scryptFileDecodeHeader(rootIndexFileBuffer);
+							rootIndexContents = cryptoFileEncoding.decode(rootIndexFileBuffer);
 						} catch (e){
 							callback(e);
 							return;
@@ -468,7 +472,7 @@
 
 			rootKey = newRootKey;
 			rootSalt = randomBuffer(16);
-			saveIndex(callback);
+			saveRootIndex(callback);
 		};
 
 		this.changePassword = function(newPassword, callback){
@@ -490,7 +494,7 @@
 
 				rootKey = derivedKey;
 				rootSalt = newSalt;
-				saveIndex(callback);
+				saveRootIndex(callback);
 			});
 		};
 
@@ -582,7 +586,7 @@
 				}
 				//Removing the collection from the main index and saving it
 				rootIndex.splice(collectionPosition, 1);
-				saveIndex(function(err){
+				saveRootIndex(function(err){
 					if (err) console.error('Error while saving new collection index, after dropping collection ' + collectionName + ': ' + err);
 					callback(err);
 				});
@@ -637,7 +641,7 @@
 				if (collectionIndexModel) collectionDescription.indexModel = clone(collectionIndexModel)
 
 				rootIndex.push(collectionDescription);
-				saveIndex(function(err){
+				saveRootIndex(function(err){
 					if (err){
 						cb(err);
 						return;
@@ -2338,10 +2342,10 @@
 		checkByte(fh.fileFormatVersion, 'fileHeader.fileFormatVersion');
 		checkUInt(fh.r, 'fileHeader.r');
 		checkUInt(fh.p, 'fileHeader.p');
-		checkUInt(fh.opsLimit, 'fileHeader.opsLimit');
+		checkUInt(fh.N, 'fileHeader.N');
 		checkBuffer(fh.salt, 'fileHeader.salt');
 		checkBufferWithLength(fh.nonce, sodium.crypto_secretbox_NONCEBYTES, 'fileHeader.nonce');
-		checkBuffer(fh.cipherText, 'fileHeader.cipherText');
+		checkBuffer(fh.cipher, 'fileHeader.cipher');
 	}
 
 	function checkByte(n, varName){

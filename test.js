@@ -80,6 +80,14 @@
 
 	}
 
+	var passCharset = 'aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ0123456789';
+
+	function randomPassword(length){
+		var s = '';
+		for (var i = 0; i < length; i++) s += passCharset[Math.floor(Math.random() * passCharset.length)];
+		return s;
+	}
+
 	exports.test = function(testPath, _fs, finalCallback){
 
 		fs = _fs || fs;
@@ -149,8 +157,57 @@
 		};
 
 		var rootKey = randomBuffer(32);
+		var rootPassword = randomPassword(12);
 
 		var params = [
+			//Testing password protection
+			{
+				message: 'Opening with a password',
+				expectedFailure: false
+			},
+			{
+				message: 'Checking that the DB is open',
+				result: true
+			},
+			{
+				message: 'Opening a collection',
+				collectionName: 'pass_test_collection'
+			},
+			{
+				message: 'Saving a doc',
+				index: {sender: 'me', receiver: 'me', message: 'forever alone'},
+				collectionName: 'pass_test_collection'
+			},
+			{
+				message: 'Closing collection',
+				collectionName: 'pass_test_collection'
+			},
+			{
+				message: 'Closing DB'
+			},
+			{
+				message: 'Re-opening with password',
+				password: randomPassword(12),
+				expectedFailure: true
+			},
+			{
+				message: 'Re-opening, with the correct password'
+			},
+			{
+				message: 'Re-opening collection',
+				collectionName: 'pass_test_collection'
+			},
+			{
+				message: 'Checking index doc presence (via count)',
+				query: {sender: 'me', receiver: 'me', message: 'forever alone'},
+				collectionName: 'pass_test_collection',
+				result: 1
+			},
+			{
+				message: 'Closing the DB again. Will re-open with root keys and test all operations',
+				clearDB: true
+			},
+			//Testing DB operations and operators, opening the DB with a rootKey (instead of a rootPassword)
 			{
 				message: 'Opening database'
 			},
@@ -556,6 +613,19 @@
 		];
 
 		var tasks = [
+			//Testing with rootPassword
+			test_openWithPassword,
+			test_isOpen,
+			test_collection,
+			test_save,
+			test_closeCollection,
+			test_close,
+			test_openWithPassword,
+			test_openWithPassword,
+			test_collection,
+			test_count,
+			test_close,
+			//Testing DB operations and features, using a rootKey
 			test_open,
 			test_isOpen,
 			test_listCollections,
@@ -636,6 +706,19 @@
 			db.open(rootKey, next);
 		}
 
+		function test_openWithPassword(next){
+			var _params = getParams();
+			db.openWithPassword(_params.password || rootPassword, function(err){
+				if (err){
+					if (!_params.expectedFailure) next(err);
+					else next();
+					return;
+				}
+
+				next();
+			});
+		}
+
 		function test_close(next){
 			var _params = getParams();
 			try {
@@ -644,7 +727,9 @@
 				next(e);
 				return;
 			}
-			next();
+
+			if (_params.clearDB) rmdirr(dbPath, next);
+			else next();
 		}
 
 		function test_changeKey(next){
