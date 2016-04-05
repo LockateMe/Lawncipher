@@ -28,7 +28,9 @@
     "node_modules",
     "bower_components",
     "test",
-    "tests"
+    "tests",
+    ".gitlab-ci.yml",
+    "Gruntfile.js"
   ],
   "dependencies": {
     "libsodium.js": "~0.2.12"
