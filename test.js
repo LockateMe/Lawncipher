@@ -744,6 +744,19 @@
 			});
 		}
 
+		function test_changePassword(next){
+			var _params = getParams();
+
+			db.changePassword(_params.newPassword, function(err){
+				if (err){
+					next(err);
+					return;
+				}
+				rootPassword = _params.newPassword;
+				next();
+			});;
+		}
+
 		function test_isOpen(next){
 			var _params = getParams();
 			var asExpected = _params.result == db.isOpen();
