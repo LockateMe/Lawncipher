@@ -175,9 +175,33 @@
 		scryptProv = sodium.crypto_pwhash_scryptsalsa208sha256_ll;
 	}
 
+	function useCordovaPluginScrypt(){
+		scryptProvAsync = true;
+		scryptProv = cordovaPluginScryptProvider;
+	}
+
+	function cordovaPluginScryptProvider(password, salt, opsLimit, r, p, keyLength, callback){
+		var dumbSalt = new Array(salt.length);
+		for (var i = 0; i < dumbSalt.length; i++) dumbSalt[i] = salt[i];
+
+		var settings = {
+			N: opsLimit,
+			r: r,
+			p: p,
+			dkLen: keyLength
+		};
+
+		window.plugins.scrypt(function(_result){
+			callback(undefined, from_hex(_result));
+		}, function(_err){
+			callback(_err);
+		}, password, dumbSalt, settings);
+	}
+
 	setDefaultScryptProvider();
 
 	exports.setScryptProvider = setScryptProvider;
+	exports.useCordovaPluginScrypt = useCordovaPluginScrypt;
 
 	exports.db = Lawncipher;
 
