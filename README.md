@@ -8,6 +8,105 @@ Lawnchair-inspired libsodium-backed encrypted persistent document storage
 
 Building a rather versatile and persistent encrypted document storage.
 
+## Design
+
+* Lawncipher is a document store
+* The entirety of Lawncipher data is encrypted using either a password or a 256-bit key. (In case a password is used, it is transformed into a root key using [scrypt](http://www.tarsnap.com/scrypt.html))
+* Instead of tables containing rows, Lawncipher has collections containing documents
+* A document in Lawncipher has a unique ID and at least one of these two things:
+    * A blob : could a JSON object, a string or arbitrary binary data (in a `Uint8Array`). It is stored encrypted and stored in a dedicated file, and decrypted on request.
+    * An indexData : An object, containing the query-able attributes of the document, stored in the collection's index.
+* When running a query, and the result list is being built, for a given result document, the result list will contain its blob. If the document doesn't have a blob, the indexData will take its place in the result list.
+* A schema, called "Index model", can be set for the indexData in a given collection. This schema gives the list and type of attributes that will be stored in the index. It can also determine whether a given attribute gives the IDs to the documents of the collection; as well as whether the value of a given attribute must be unique across the collection (without giving document IDs).
+* When inserting a document, if a JSON object is given as blob, the indexData can easily be extracted from the blob.
+* A document can be forced to expire, using TTLs (Time-to-live)
+
+## Getting started
+
+### In Node.js
+
+```shell
+npm install lawncipher
+```
+
+Then, we are good to go:
+
+```js
+var Lawncipher = require('lawncipher');
+var db = new Lawncipher.db('path/to/my/database');
+
+db.openWithPassword('strongPasswordWow', function(err){
+    if (err){
+        if (err == 'INVALID_ROOTKEY'){
+            //Invalid password
+        }
+        return;
+    }
+
+    //Do things with the database
+});
+```
+
+### In Cordova
+
+Install the Cordova plugins:
+* [cordova-plugin-file-node-like](https://github.com/LockateMe/cordova-plugin-file-node-like)
+* [cordova-plugin-scrypt](https://github.com/Crypho/cordova-plugin-scrypt) (Optional, but highly recommended, especially on iOS)
+
+Then install Lawncipher:
+
+```shell
+bower install lawncipher
+```
+
+Once we have installed Lawncipher (and the plugins mentioned above) and that we have imported Lawncipher into our application:
+
+```js
+//Initialize the file system
+window.plugins.nodefs.init(function(err){
+    if (err){
+        console.error('Error while initializing the file system: ' + err);
+        return;
+    }
+
+    var fs = window.plugins.nodefs(window._fs);
+
+    //If you have installed cordova-plugin-scrypt
+    Lawncipher.useCordovaPluginScrypt();
+
+    var db = new Lawncipher.db('path/to/my/db', fs);
+
+    db.openWithPassword('strongPasswordWow', function(err){
+        if (err){
+            if (err == 'INVALID_ROOTKEY'){
+                //Invalid password
+            }
+            return;
+        }
+
+        //Do things with the database
+    });
+});
+```
+
+## Example queries (and their SQL counterpart)
+
+__`Collection.find('abc')`__ : Looking up the document having 'abc' as ID.
+
+__`Collection.find({firstName: 'Steve', lastName: 'Jobs'}, callback)`__
+SELECT * FROM tableName WHERE firstName = 'Steve' AND lastName = 'Jobs'
+
+__`Collection.find({firstName: 'Steve', $not: {lastName: 'Jobs'}}, callback)`__ SELECT * FROM tableName WHERE firstName = 'Steve' AND lastName <> 'Jobs'
+
+__`Collection.find({$or: [{firstName: ’Steve}, {lastName: ‘Jobs'}]}, callback)`__
+SELECT * FROM tableName WHERE firstName = 'Steve' OR lastName = 'Jobs'  
+
+__`Collection.find({firstName: 'Steve', $or: [{lastName: 'Wozniak'}, {lastName: 'Jobs'}])`__
+SELECT * FROM tableName WHERE firstName = 'Steve' AND (lastName = 'Wozniak' OR lastName = 'Jobs')
+
+__`Collection.find({firstName: 'Steve', $sort: {lastName: 'asc'}, $skip: 100}, callback, 100)`__
+SELECT * FROM tableName WHERE firstName = 'Steve' ORDER BY lastName ASC LIMIT 100 OFFSET 100 (get the 101-200 guys who are called Steve, ordered alphabetically by lastName)
+
 ## API
 
 ### `new Lawncipher.db(rootPath, [fs])`
@@ -15,30 +114,37 @@ Constructor method
 * `String rootPath` : root Lawncipher directory path
 * `Object fs` : The filesystem object to be used by the Lawncipher instance. Required when running in Cordova; the instance must come from [cordova-plugin-file-node-like](https://github.com/LockateMe/cordova-plugin-file-node-like)
 
-### `Lawncipher.open(rootKey, callback)`
+### `Lawncipher.useCordovaPluginScrypt()`
+Call this function to tell Lawncipher to use [cordova-plugin-scrypt](https://github.com/Crypho/cordova-plugin-scrypt) when it needs to derive passwords into encryption keys. To be called only if the scrypt plugin is installed.
+
+### `Lawncipher.setScryptProvider(scryptProvider, useAsynchronously)`
+* Function|String scryptProvider. The function that will be used as scrypt provider. The function must have the following interface : (String password, Uint8Array salt, Number opsLimit, Number r, Number p, Number keyLength, [Function callback(err, derivedKey)]). To reset the provider to the default one (using libsodium.js), pass `'default'` or `'reset'` instead of a function.
+* Boolean useAsynchronously : to be set as `true` if the scryptProvider is asynchronous and will use the `callback(err, derivedKey)` to pass its result.
+
+### `db.open(rootKey, callback)`
 Open the Lawncipher document store
 * `Uint8Array rootKey` : the Lawncipher root key
 * `Function callback` : callback function. Receiving only an `err` string, that is defined in case an error occurred while opening the DB. This callback function is invoked when the DB collection list has been loaded
 
-### `Lawncipher.close()`
+### `db.close()`
 Close Lawncipher, if open
 
-### `Lawncipher.isOpen()`
+### `db.isOpen()`
 Returns a boolean, indicating whether Lawncipher is open or not
 
-### `Lawncipher.collection(name, indexModel, callback)`
+### `db.collection(name, indexModel, callback)`
 Open an existing Lawncipher collection, or creates it if it doesn't exist
 * `String name` : the collection's name
 * `Object|Array<String> indexModel` : the index model. The attributes that will be extracted and/or saved in the collection's \_index file. The query-able data. If the collection already exists, this parameter will simply be ignored. Optional parameter.
 * `Function callback` : callback function, receiving errors or the constructed Collection object (`function(err, collection)`)
 * returns the constructed `Collection` object
 
-### `Lawncipher.collections(callback)`
+### `db.collections(callback)`
 Getting the names of existing collections
 * `Function callback(err, collectionsNames)` : callback function receiving an error or the collectionsNames array of strings
 * Returns the collectionsNames array of strings
 
-### `Lawncipher.dropCollection(collectionName, callback)`
+### `db.dropCollection(collectionName, callback)`
 Deleting an existing collection. Note that this operation once invoked cannot be undone.
 * `String collectionName` : the name of the collection to be deleted
 * `Function callback` : the callback function, receiving `(err)`, a string briefly describing the error, if one occurred
@@ -118,18 +224,6 @@ It works a bit like in MongoDB:
 
 __About Time-to-live (TTL)__
 Lawncipher checks for expired docs every 5 seconds
-
-## Construction
-
-* You can organize documents/data by collection.
-* Documents/data can be objects, arbitrary strings or buffers
-* Each document can have data stored in an in-memory index. This part of the document (which isn't necessarily linked to the content of the document itself) is called the "indexed document"
-* You can enforce data models on your indexed documents. Indexed documents can also be arbitrary documents, at the expense of performance if you happen to insert large objects as index data.
-* Indexed documents can be queried
-* Each document can be made to expire and automatically be definitely removed from its collection
-* Each collection is composed of an encrypted `_index` file, listing the documents IDs, their query-able "indexed" data and their TTL.
-* When you build a lawncipher, you choose your root path. It will contain the folders specific to each collection, and an `_index` file listing them all with their name and main scrypt and index model parameters
-* Password verification must be done AOT...
 
 ### Root `_index` file model
 
