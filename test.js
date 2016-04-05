@@ -159,6 +159,23 @@
 		var rootKey = randomBuffer(32);
 		var rootPassword = randomPassword(12);
 
+		/*For future tests reorganization
+		function testWithRootKey(cb){
+
+		}
+
+		function testWithPassword(cb){
+
+		}
+
+		function testUnmodelledCollection(cb){
+
+		}
+
+		function testModelledCollection(cb){
+
+		}*/
+
 		var params = [
 			//Testing password protection
 			{
@@ -202,6 +219,34 @@
 				query: {sender: 'me', receiver: 'me', message: 'forever alone'},
 				collectionName: 'pass_test_collection',
 				result: 1
+			},
+			{
+				message: 'Changing the password',
+				newPassword: randomPassword(12)
+			},
+			{
+				message: 'Closing the collection',
+				collectionName: 'pass_test_collection'
+			},
+			{
+				message: 'Closing DB'
+			},
+			{
+				message: 'Re-opening DB with new password'
+			},
+			{
+				message: 'Re-opening collection',
+				collectionName: 'pass_test_collection'
+			},
+			{
+				message: 'Checking doc existence again, with count',
+				query: {sender: 'me', receiver: 'me', message: 'forever alone'},
+				collectionName: 'pass_test_collection',
+				result: 1
+			},
+			{
+				message: 'Closing collection, finally',
+				collectionName: 'pass_test_collection'
 			},
 			{
 				message: 'Closing the DB again. Will re-open with root keys and test all operations',
@@ -624,6 +669,13 @@
 			test_openWithPassword,
 			test_collection,
 			test_count,
+			test_changePassword,
+			test_closeCollection,
+			test_close,
+			test_openWithPassword,
+			test_collection,
+			test_count,
+			test_closeCollection,
 			test_close,
 			//Testing DB operations and features, using a rootKey
 			test_open,
