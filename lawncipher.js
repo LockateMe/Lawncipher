@@ -293,7 +293,6 @@
 
 			//Loading collections. Or more precisely checking their description format. But why?
 			function loadCollections(){
-				console.log('rootIndex: ' + JSON.stringify(rootIndex));
 				if (rootIndex.length == 0){
 					console.log('No collection description to load');
 					callback();
