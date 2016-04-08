@@ -736,7 +736,7 @@
 										documentsIndex.indexModel = indexModel;
 										serializedIndex.indexModel = indexModel;
 										collectionDescription.indexModel = indexModel;
-										saveIndex(function(err){ //Saving root Lawncipher index (updating collection description)
+										saveRootIndex(function(err){ //Saving root Lawncipher index (updating collection description)
 											if (err){
 												cb(err);
 												return;
@@ -1056,25 +1056,25 @@
 				}
 
 				var docIDs = [];
-				var saveIndex = 0;
+				var _saveIndex = 0;
 				var isLast = false;
 				function saveOne(){
-					self.save(blobs ? blobs[saveIndex] : undefined, indices ? indices[saveIndex] : undefined, function(err, docId){
+					self.save(blobs ? blobs[_saveIndex] : undefined, indices ? indices[_saveIndex] : undefined, function(err, docId){
 						if (err){
 							cb(err);
 							return;
 						}
 						docIDs.push(docId);
 						next();
-					}, overwrite, ttl ? ttl[saveIndex] : undefined, !isLast); //Write index only when the last doc is inserted
+					}, overwrite, ttl ? ttl[_saveIndex] : undefined, !isLast); //Write index only when the last doc is inserted
 				}
 
 				function next(){
-					saveIndex++;
-					if (saveIndex == dataLength - 1) isLast = true;
-					if (saveIndex == dataLength) cb(undefined, docIDs);
+					_saveIndex++;
+					if (_saveIndex == dataLength - 1) isLast = true;
+					if (_saveIndex == dataLength) cb(undefined, docIDs);
 					else {
-						if (saveIndex % 100 == 0) setTimeout(saveOne, 0);
+						if (_saveIndex % 100 == 0) setTimeout(saveOne, 0);
 						else saveOne();
 					}
 				}
