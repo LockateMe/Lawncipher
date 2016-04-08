@@ -274,6 +274,10 @@
 
 							rootIndexBuffer = checkReadBuffer(rootIndexBuffer);
 
+							rootIndexHeader = rootIndexHeader || cryptoFileEncoding.decode(rootIndexBuffer);
+
+							rootSalt = rootIndexHeader.salt;
+
 							var rootIndexStr;
 							try {
 								rootIndexStr = cryptoFileEncoding.decrypt(rootIndexBuffer, rootKey, rootIndexHeader);
