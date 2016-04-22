@@ -1,6 +1,6 @@
 # Lawncipher
 
-[Lawnchair](http://brian.io/lawnchair) and [MongoDB](https://www.mongodb.org)-inspired [libsodium](https://github.com/jedisct1/libsodium)-backed encrypted persistent document storage. Designed (and [tested](testing)) for [Cordova](http://cordova.apache.org)/[Phonegap](http://phonegap.com) and [Node.js](https://nodejs.org)
+[Lawnchair](http://brian.io/lawnchair) and [MongoDB](https://www.mongodb.org)-inspired [libsodium](https://github.com/jedisct1/libsodium)-backed encrypted persistent document storage. Designed (and [tested](#testing)) for [Cordova](http://cordova.apache.org)/[Phonegap](http://phonegap.com) and [Node.js](https://nodejs.org)
 
 ## Goal
 
