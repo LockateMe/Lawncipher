@@ -122,8 +122,13 @@ Call this function to tell Lawncipher to use [cordova-plugin-scrypt](https://git
 * Boolean useAsynchronously : to be set as `true` if the scryptProvider is asynchronous and will use the `callback(err, derivedKey)` to pass its result.
 
 ### `db.open(rootKey, callback)`
-Open the Lawncipher document store
-* `Uint8Array rootKey` : the Lawncipher root key
+Open the Lawncipher document store, with a root encryption key
+* `Uint8Array rootKey` : the Lawncipher root key. Must be 256 bits / 32 bytes long
+* `Function callback` : callback function. Receiving only an `err` string, that is defined in case an error occurred while opening the DB. This callback function is invoked when the DB collection list has been loaded
+
+### `db.openWithPassword(password, callback)`
+Open the Lawncipher document store, with a user-provided password
+* `String password` : the password, that will be derived into a 32 bytes rootKey by scrypt
 * `Function callback` : callback function. Receiving only an `err` string, that is defined in case an error occurred while opening the DB. This callback function is invoked when the DB collection list has been loaded
 
 ### `db.close()`
