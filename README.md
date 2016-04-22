@@ -1,6 +1,6 @@
 # Lawncipher
 
-[Lawnchair](http://brian.io/lawnchair) and [MongoDB](https://www.mongodb.org)-inspired [libsodium](https://github.com/jedisct1/libsodium)-backed encrypted persistent document storage. Designed (and tested) for [Cordova](http://cordova.apache.org)/[Phonegap](http://phonegap.com) and [Node.js](https://nodejs.org)
+[Lawnchair](http://brian.io/lawnchair) and [MongoDB](https://www.mongodb.org)-inspired [libsodium](https://github.com/jedisct1/libsodium)-backed encrypted persistent document storage. Designed (and [tested](testing)) for [Cordova](http://cordova.apache.org)/[Phonegap](http://phonegap.com) and [Node.js](https://nodejs.org)
 
 ## Goal
 
@@ -104,6 +104,22 @@ SELECT * FROM tableName WHERE firstName = 'Steve' AND (lastName = 'Wozniak' OR l
 
 __`Collection.find({firstName: 'Steve', $sort: {lastName: 'asc'}, $skip: 100}, callback, 100)`__
 SELECT * FROM tableName WHERE firstName = 'Steve' ORDER BY lastName ASC LIMIT 100 OFFSET 100 (get the 101-200 guys who are called Steve, ordered alphabetically by lastName)
+
+## Testing
+
+Here is how you can run unit tests in the compatible runtimes
+
+### Node.js
+
+Go to the directory where the Lawncipher library is located, and run
+
+```shell
+node test.js
+```
+
+### Cordova/Phonegap
+
+A [small test app](https://github.com/LockateMe/Lawncipher-cordova-test) has been built for that purpose.
 
 ## API
 
@@ -275,3 +291,7 @@ Notes:
 * `unique` and `id` parameters are optional. If not defined, they are then assumed as `false`
 * a field set as `id` is also implicitly unique
 * you can only set one field as ID. If you transgress this rule, the collection construction will return an error
+
+## License
+
+Lawncipher is licensed under the terms of the MIT license.
