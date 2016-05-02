@@ -1641,7 +1641,7 @@
 				}
 			}
 
-			function saveDoc(docId, fileData, indexData, blobType, ttl, cb, overwrite, doNotWriteIndex){
+			function saveDoc(docId, fileData, indexData, blobType, ttl, cb, doNotWriteIndex){
 				var docIndexObj;
 				saveIndex(function(err){
 					if (err) cb(err);
