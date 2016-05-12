@@ -8,18 +8,18 @@
 	}
 
 	if (typeof define === 'function' && define.amd){
-		define(['exports', 'sodium', 'console', _nodeContext.toString(), 'require', 'window'], factory);
+		define(['exports', 'sodium', 'console', _nodeContext.toString(), 'require', 'window', 'Long', 'bson'], factory);
 	} else if (typeof exports !== 'undefined'){
-		factory(exports, require('libsodium-wrappers'), console, _nodeContext, require, !_nodeContext ? window : undefined);
+		factory(exports, require('libsodium-wrappers'), console, _nodeContext, require, !_nodeContext ? window : undefined, require('long'), require('bson'));
 	} else {
 		var cb = root.Lawncipher && root.Lawncipher.onload;
-		factory((root.Lawncipher = {}), sodium, console, _nodeContext, typeof require != 'undefined' && require, !_nodeContext ? window : undefined);
+		factory((root.Lawncipher = {}), sodium, console, _nodeContext, typeof require != 'undefined' && require, !_nodeContext ? window : undefined, Long, bson);
 		if (typeof cb == 'function'){
 			cb(root.Lawncipher);
 		}
 	}
 
-}(this, function(exports, sodium, console, nodeContext, require, window){
+}(this, function(exports, sodium, console, nodeContext, require, window, Long, BSON){
 
 	var fs; //FileSystem reference. Depends on context
 	var pathJoin, rmdirr, mkdirp, fsExists; //Reference to "special case" fs methods, whose implementations are not always present/part of the fs library that we have. Populated in the if(nodeContext) below
@@ -2391,4 +2391,308 @@
 		if (!(b instanceof Uint8Array && b.length == bLength)) throw new TypeError(varName + ' must be a buffer (Uint8Array), that is ' + bLength + ' bytes long');
 	}
 
+	function checkStringArray(a, varName, disallowEmpty){
+		if (!Array.isArray(a)) throw new TypeError(varName + ' must be an array');
+		if (disallowEmpty && a.length == 0) throw new TypeError(varName + ' cannot be empty');
+
+		for (var i = 0; i < a.length; i++) if (typeof a[i] != 'string') throw new TypeError(varName + '[' + i + '] must be a string');
+	}
+
+	function copyBuffer(b){
+		checkBuffer(b, 'b');
+		var bCopy = new Uint8Array(b.length);
+		for (var i = 0; i < b.length; i++) bCopy[i] = b[i];
+		return bCopy;
+	}
+
+	function PearsonHasher(seed, hashLength){
+		if (!((Array.isArray(seed) || seed instanceof Uint8Array) && seed.length == 256)) throw new TypeError('seed must be an array containing a substitution of integers [0-255]');
+		if (!checkSeedIntegrity()) throw new TypeError('Invalid seed');
+
+		hashLength = hashLength || 8;
+		if (!(typeof hashLength == 'number' && Math.floor(hashLength) == hashLength && hashLength > 0 && hashLength < 9)) throw new TypeError('hashLength must be an integer in the range [1-8]');
+
+		function checkSeedIntegrity(){
+			var seedSet = {};
+			for (var i = 0; i < 256; i++){
+				var currentSeedVal = seed[i];
+				if (!(currentSeedVal >= 0 && currentSeedVal <= 255)) return false;
+				currentSeedVal = currentSeedVal.toString();
+				if (seedSet[currentSeedVal]) return false;
+				seedSet[currentSeedVal] = true;
+			}
+
+			return true;
+		}
+
+		return function(d){
+			if (!((d instanceof Uint8Array || typeof d == 'string') && d.length > 0)) throw new TypeError('data must be either a Uint8Array or a string');
+
+			var hash = new Uint8Array(hashLength);
+			var i = 0, j = 0;
+			for (var j = 0; j < hashLength; j++){
+				var hashByte = seed[(d[i] + j) % 256];
+				for (var i = 1; i < d.length; i++){
+					hashByte = s[(hashByte ^ d[i])];
+				}
+				hash[j] = hashByte;
+			}
+			return hash;
+		}
+	}
+
+	//B+ tree-like construction??
+	function PearsonBins(maxBinWidth, hasher, collectionIndexRef){
+		//Maximum size of a bin. Ideally this number should represent the size of the data to be held by a single index fragment file
+		if (!(typeof maxBinWidth == 'number' && Math.floor(maxBinWidth) == maxBinWidth && maxBinWidth > 0)) throw new TypeError('maxBinWidth must be a strictly positive integer');
+		//The function retruned from PearsonHasher()
+		if (typeof hasher != 'function') throw new TypeError('hasher must be a function');
+		//Reference to the collections index. Useful to estimate JSON/doc size
+		if (typeof collectionIndexRef != 'object') throw new TypeError('collectionIndexRef must be an object');
+
+		var self = this;
+
+		var evHandlers = {};
+
+		self.on = function(eventName, handler){
+			if (!(typeof eventName == 'string' && eventName.length > 0)) throw new TypeError('eventName must be a string');
+			if (typeof handler != 'function') throw new TypeError('handler must be a function');
+
+			if (evHandlers[eventName]){
+				evHandlers[eventName].push(handler);
+			} else {
+				evHandlers[eventName] = [handler];
+			}
+		};
+
+		self.off = function(eventName, handler){
+			if (!(typeof eventName == 'string' && eventName.length > 0)) throw new TypeError('eventName must be a string');
+			if (handler && typeof handler != 'function') throw new TypeError('when defined, handler must be a function');
+
+			if (!evHandlers[eventName]) return;
+
+			if (handler){
+				for (var i = 0; i < evHandlers[eventName].length; i++){
+					if (evHandlers[eventName][i] == handler){
+						evHandlers[eventName].splice(i, 1);
+						break;
+					}
+				}
+			} else {
+				delete evHandlers[eventName];
+			}
+		};
+
+		self.add = function(docId, noTrigger){
+			if (!(typeof docId == 'string' && docId.length > 0)) throw new TypeError('docId must be a non-empty string');
+
+
+		};
+
+		self.remove = function(docId, noTrigger){
+			if (!(typeof docId == 'string' && docId.length > 0)) throw new TypeError('docId must be a non-empty string');
+
+		};
+
+		self.getDistribution = function(){
+
+		};
+
+		function triggerEv(evName, args, _handlers){
+			var hanlders = _handlers || evHandlers;
+			if (!handlers[evName]) return;
+
+			var currentEvHandlers = handlers[evName];
+			for (var i = 0; i < currentEvHandlers.length; i++){
+				currentEvHandlers[i].apply(undefined, args);
+			}
+		}
+
+		function TreeNode(startRange, endRange, _preload, _parent){
+			if (!(startRange instanceof Long)) throw new TypeError('startRange must be a Long instance');
+			if (!(endRange instanceof Long)) throw new TypeError('endRange must be a Long instance');
+			if (_preload){
+			 	if (!Array.isArray(_preload)) throw new TypeError('when defined, _preload must be an array');
+				checkStringArray(_preload, '_preload');
+			}
+
+			var left, right, parent;
+			if (_parent){
+				if (!(_parent instanceof TreeNode)) throw new TypeError('when defined, _parent must be a tree node instance');
+			}
+
+			var middlePoint = splitRange(startRange, endRange);
+			var data = _preload || [];
+
+			this._data = data;
+
+			this.add = function(docId){
+				if (typeof docId == 'string'){
+					docId = from_string(docId);
+				}
+				var docIdHash = hasher(docId);
+			};
+
+			this.addWithHash = function(hash, docId){
+
+			};
+
+			this.remove = function(docId){
+
+			};
+
+			this.removeWithHash = function(hash, docId){
+
+			};
+
+			this.range = function(){
+				return {start: startRange, end: endRange};
+			};
+
+			this.mergeWith = function(otherNode){
+
+			};
+
+			this.getLeft = function(){
+				return left;
+			};
+
+			this.getRight = function(){
+				return right;
+			};
+
+			this.setLeft = function(l){
+				if (l && !(l instanceof TreeNode)) throw new TypeError('l must be a tree node');
+				left = l;
+			};
+
+			this.setRight = function(r){
+				if (r && !(r instanceof TreeNode)) throw new TypeError('r must be a tree node');
+				right = r;
+			};
+
+			this.isLeaf = isLeaf;
+
+			this.getBinnedRange = function(){
+
+				var resultObject = {startRange: startRange, endRange: endRange};
+			}
+
+			function isLeaf(){
+				return !(left || right);
+			}
+
+			function mergeWith(otherNode){
+
+			}
+		}
+
+		function estimateFragmentSize(n){
+			var totalFargmentSize = 0;
+			for (var i = 0; i < n._data.length; i++){
+				totalFargmentSize += jsonSize(collectionIndexRef[n._data[i]]);
+			}
+			return totalFargmentSize;
+		}
+
+		function findCommonPrefix(a, b){
+			if (!(a instanceof Uint8Array && a.length > 0)) throw new TypeError('a must be a non-empty Uint8Array');
+			if (!(b instanceof Uint8Array && b.length > 0)) throw new TypeError('b must be a non-empty Uint8Array');
+
+			var maxPrefixLength = Math.min(a.length, b.length);
+			var prefixLength = 0;
+			for (var i = 0; i < maxPrefixLength; i++){
+				if (a[i] != b[i]){
+					prefixLength = i;
+					break;
+				}
+			}
+
+			if (prefixLength == 0) return;
+
+			var p = new Uint8Array(prefixLength);
+			for (var i = 0; i < p.length; i++) p[i] = a[i];
+			return p;
+		}
+
+		function splitRange(s, e){
+			var middle = midRange(s, e);
+			return [{s: s, e: middle}, {s: middle.add(1), e: e}];
+		}
+
+		function midRange(s, e){
+			var rangeWidth = e.subtract(s);
+			var middle = s.add(rangeWidth.divide(2));
+			return middle;
+		}
+
+		function bufferBEToLong(b){
+			var l, h = 0;
+			for (var i = 0; i < 4; i++){
+				h += b[i] << 8 * (4 - i);
+			}
+			for (var i = 0; i < 4; i++){
+				l += b[i+4] << 8 * (4 - i);
+			}
+			return new Long(h, l, true);
+		}
+
+		function longToBufferBE(l){
+			var b = new Uint8Array(8);
+			for (var i = 0; i < 4; i++){
+				b[i] = l.high >> 8 * (4 - i);
+			}
+			for (var i = 0; i < 4; i++){
+				b[i+4] = l.low >> 8 * (4 - i);
+			}
+			return b;
+		}
+
+		function incrRangeElement(a){
+			if (!(a instanceof Uint8Array)) throw new TypeError('A must be a Uint8Array');
+			a = copyBuffer(a);
+			for (var i = a.length - 1; i >= 0; i--){
+				if (a[i] == 255){ //A carry will ensue from the incrementation
+					a[i]++;
+				} else {
+					a[i]++;
+					break;
+				}
+			}
+
+			return a;
+		}
+	}
+
+	function jsonSize(o){
+		var oType = typeof o;
+		if (oType == 'string') return o.length + 2; //+2 for the double quotes encapsulating strings in JSON
+		else if (oType == 'number' || oType == 'boolean') return o.toString().length;
+		else if (oType == 'undefined' || oType == 'function') return 0;
+
+		if (oType != 'object') return 0;
+		//Beyond this point, o is an object
+		var oSize = 0;
+		if (o == null){
+			oSize = 4;
+		} else if (Array.isArray(o)){
+			oSize += 2;
+			for (var i = 0; i < o.length; i++){
+				oSize += jsonSize(o[i]);
+				if (i != o.length - 1) oSize++; //A comma after each element, except the last one
+			}
+		} else if (o instanceof Date){
+			return jsonSize(o.toISOString());
+		} else {
+			var attrList = Object.keys(o);
+			oSize += 2; //counting {}
+			for (var i = 0; i < attrList.length; i++){
+				oSize += attrList[i].length + 3; //Counting attribute length + "":
+				oSize += jsonSize(o[attrList[i]]); //Counting attribute value's size
+				if (i != attrList.length - 1) oSize++; //A comme after each attribute, expect the last one
+			}
+		}
+
+		return oSize;
+	}
 }));
