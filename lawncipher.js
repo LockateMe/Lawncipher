@@ -123,6 +123,10 @@
 	var from_hex = sodium.from_hex, to_hex = sodium.to_hex, from_base64 = sodium.from_base64, to_base64 = sodium.to_base64;
 	var from_string = sodium.string_to_Uint8Array || sodium.from_string, to_string = sodium.uint8Array_to_String || sodium.to_string;
 
+	var is_hex = function(s){
+		return typeof s == 'string' && s.length % 2 == 0 && /^([a-f]|[0-9])+$/ig.test(s);
+	};
+
 	var cryptoFileEncoding = {
 		encrypt: scryptFileEncode,
 		decrypt: scryptFileDecode,
@@ -1406,6 +1410,10 @@
 				fs.writeFile(indexFilePath, docsIndexFile, cb);
 			}
 
+			function getIndexFileName(startRange, endRange){
+				return '_index_' + to_hex(longToBufferBE(startRange)) + '_' + to_hex(longToBufferBE(endRange));
+			}
+
 			function applyQuery(query, dataset, limit, matchFunction, includePureBlobs){
 				if (limit && !(typeof limit == 'number' && limit == Math.floor(limit) && limit > 0)) throw new TypeError('When provided, limit must be a strictly positive integer number');
 				if (matchFunction && typeof matchFunction != 'function') throw new TypeError('when provided, matchFunction must be a function');
@@ -2100,6 +2108,19 @@
 	exports.clone = clone;
 
 	/*
+	* Shallow copy of an object.
+	*/
+	function shallowCopy(source, target){
+		if (typeof source != 'object') throw new TypeError('source must be an object');
+		if (target && typeof target != 'object') throw new TypeError('when defined, target must be an object');
+
+		var c = target || {};
+		var sourceAttr = Object.keys(source);
+		for (var i = 0; i < sourceAttr.length; i++) c[sourceAttr[i]] = source[sourceAttr[i]];
+		return c;
+	}
+
+	/*
 	* Deep object equality
 	*/
 	function deepObjectEquality(o1, o2){
@@ -2398,11 +2419,49 @@
 		for (var i = 0; i < a.length; i++) if (typeof a[i] != 'string') throw new TypeError(varName + '[' + i + '] must be a string');
 	}
 
+	function checkSubCollection(subCollection, varName){
+		if (typeof subCollection != 'object') throw new TypeError(varName + ' must be an object');
+		var docList = Object.keys(subCollection);
+		for (var i = 0; i < docList.length; i++){
+			if (!checkDocIndexObj(subCollection[docList[i]])){
+				console.error('Invalid subCollection element [' + docList[i] + ']: ' + JSON.stringify(subCollection[docList[i]]));
+			}
+		}
+	}
+
+	function checkDocIndexObj(o){
+		return typeof o == 'string' && (typeof o.index == 'object'|| typeof o.blobType == 'string');
+	}
+
 	function copyBuffer(b){
 		checkBuffer(b, 'b');
 		var bCopy = new Uint8Array(b.length);
 		for (var i = 0; i < b.length; i++) bCopy[i] = b[i];
 		return bCopy;
+	}
+
+	function PearsonSeedGenerator(){
+		var orderingRandomData = randomBuffer(1024); //256 * 4
+		var orderingArray = new Array(256);
+		for (var i = 0; i < 256; i++){
+			var orderWeight = 0;
+			for (var j = 0; j < 4; j++){
+				orderWeight += orderingRandomData[4 * i + j] * Math.pow(2, j);
+			}
+			orderingArray[i] = {orderWeight: orderWeight, seedElement: i};
+		}
+
+		orderingArray.sort(function(a, b){
+			if (a.orderWeight < b.orderWeight){
+				return -1;
+			} else {
+				return 1;
+			}
+		});
+
+		return orderingArray.map(function(elem){
+			return elem.seedElement;
+		});
 	}
 
 	function PearsonHasher(seed, hashLength){
@@ -2427,6 +2486,7 @@
 
 		return function(d){
 			if (!((d instanceof Uint8Array || typeof d == 'string') && d.length > 0)) throw new TypeError('data must be either a Uint8Array or a string');
+			if (typeof d == 'string') d = from_string(d);
 
 			var hash = new Uint8Array(hashLength);
 			var i = 0, j = 0;
@@ -2442,7 +2502,7 @@
 	}
 
 	//B+ tree-like construction??
-	function PearsonBins(maxBinWidth, hasher, collectionIndexRef){
+	function PearsonBPlusTree(maxBinWidth, hasher, collectionIndexRef){
 		//Maximum size of a bin. Ideally this number should represent the size of the data to be held by a single index fragment file
 		if (!(typeof maxBinWidth == 'number' && Math.floor(maxBinWidth) == maxBinWidth && maxBinWidth > 0)) throw new TypeError('maxBinWidth must be a strictly positive integer');
 		//The function retruned from PearsonHasher()
@@ -2452,7 +2512,12 @@
 
 		var self = this;
 
+		//The events that are called
+		//'changed', parameter: range
+		//'deleted', parameter: range
+
 		var evHandlers = {};
+		var rootNode = new TreeNode(new Long(0x00000000, 0x00000000, true), new Long(0xFFFFFFFF, 0xFFFFFFFF, true));
 
 		self.on = function(eventName, handler){
 			if (!(typeof eventName == 'string' && eventName.length > 0)) throw new TypeError('eventName must be a string');
@@ -2483,15 +2548,59 @@
 			}
 		};
 
-		self.add = function(docId, noTrigger){
+		self.add = function(docId){
 			if (!(typeof docId == 'string' && docId.length > 0)) throw new TypeError('docId must be a non-empty string');
 
-
+			rootNode.add(docId);
 		};
 
-		self.remove = function(docId, noTrigger){
+		self.remove = function(docId){
 			if (!(typeof docId == 'string' && docId.length > 0)) throw new TypeError('docId must be a non-empty string');
 
+			rootNode.remove(docId);
+		};
+
+		/**
+		* Insert tree data for a given range
+		* @private
+		* @param {String|Long|Uint8Array} startRange - the beginning of the data range to insert
+		* @param {String|Long|Uint8Array} endRange - the end of the data range to insert
+		* @param {Object} subCollection - the documents/tree data to insert
+		*/
+		self.insertRange = function(startRange, endRange, subCollection){
+			if (typeof startRange == 'string'){
+				if (!(startRange.length == 16 && is_hex(startRange))) throw new TypeError('when startRange is a string, it must be a hex representation of a long (i.e, 8 bytes -> 16 hex chars)');
+				startRange = from_hex(startRange);
+			}
+			if (startRange instanceof Uint8Array){
+				startRange = bufferBEToLong(startRange);
+			}
+			if (!(startRange instanceof Long)) throw new TypeError('startRange must be either a hex string, an 8 byte buffer, or a Long instance');
+
+			if (typeof endRange == 'string'){
+				if (!(endRange.length == 16 && is_hex(endRange))) throw new TypeError('when endRange is a string, it must be a hex representation of a long (i.e, 8 bytes -> 16 hex chars)');
+				endRange = from_hex(endRange);
+			}
+			if (endRange instanceof Uint8Array){
+				endRange = bufferBEToLong(endRange);
+			}
+			if (!(endRange instanceof Long)) throw new TypeError('endRange must be either a hex string, an 8 byte buffer, or a Long instance');
+
+			var currentParent = rootNode;
+			var isHolderOfRange = false;
+			do {
+
+			} while (!isHolderOfRange);
+		};
+
+		self.lookup = function(docId, hash){
+			if (typeof docId != 'string') throw new TypeError('docId must be a string');
+			if (!hash){
+				hash = hasher(docId);
+				self.lookup(docId, hash);
+				return;
+			}
+			rootNode.lookup(docId, hash);
 		};
 
 		self.getDistribution = function(){
@@ -2508,91 +2617,225 @@
 			}
 		}
 
-		function TreeNode(startRange, endRange, _preload, _parent){
+		function TreeNode(startRange, endRange, _subCollection, _parent){
 			if (!(startRange instanceof Long)) throw new TypeError('startRange must be a Long instance');
 			if (!(endRange instanceof Long)) throw new TypeError('endRange must be a Long instance');
-			if (_preload){
-			 	if (!Array.isArray(_preload)) throw new TypeError('when defined, _preload must be an array');
-				checkStringArray(_preload, '_preload');
+			if (_subCollection){
+				if (typeof _subCollection != 'object') throw new TypeError('when defined, _subCollection must be an object');
+				checkSubCollection(_subCollection, '_subCollection');
+			 	//if (!Array.isArray(_preloadDocIds)) throw new TypeError('when defined, _preloadDocIds must be an array');
+				//checkStringArray(_preloadDocIds, '_preloadDocIds');
 			}
 
 			var left, right, parent;
 			if (_parent){
 				if (!(_parent instanceof TreeNode)) throw new TypeError('when defined, _parent must be a tree node instance');
+				parent = _parent;
 			}
 
-			var middlePoint = splitRange(startRange, endRange);
-			var data = _preload || [];
+			var thisNode = this;
 
-			this._data = data;
+			var middlePoint = midRange(startRange, endRange);
+			var subCollection = _subCollection || {};
+			var currentDataSize = 0;
 
-			this.add = function(docId){
-				if (typeof docId == 'string'){
-					docId = from_string(docId);
+			if (docIds.length > 0){ //Data has been provided on initialization. It's total size must be estimated
+				for (var i = 0; i < docIds.length; i++){
+					currentDataSize += getDocSize(data[i]);
 				}
+			}
+
+			thisNode._subCollection = subCollection;
+
+			thisNode.setSubCollection = function(_subCollection){
+				if (typeof _subCollection != 'object') throw new TypeError('_subCollection must an object');
+				checkSubCollection(_subCollection, '_subCollection');
+
+				if (!isLeaf()){
+					throw new Error('Node cannot receive subCollection if not leaf');
+				}
+
+				subCollection = _subCollection;
+				thisNode._subCollection = _subCollection;
+			};
+
+			//Add a docId in the tree, and return the range of the node that ended-up receiving that doc
+			thisNode.add = function(docId){
 				var docIdHash = hasher(docId);
+				thisNode.addWithHash(docIdHash, docId);
 			};
 
-			this.addWithHash = function(hash, docId){
+			thisNode.addWithHash = function(hash, docId){
+				if (!(hash instanceof Uint8Array && hash.length == 8) && !(hash instanceof Long)) throw new TypeError('hash must be a non-empty array or a Long instance');
+				if (hash instanceof Uint8Array){
+					hash = bufferBEToLong(hash);
+				}
 
+				if (isLeaf()){
+					var docSize = getDocSize(docId);
+					var newNodeSize = currentDataSize + docSize;
+					if (newNodeSize >= maxBinWidth){
+						splitNode(noTrigger);
+						if (hash.lte(middlePoint)){
+							left.addWithHash(hash, docId);
+						} else {
+							right.addWithHash(hash, docId);
+						}
+					} else {
+						currentCollectionSize += docSize;
+						subCollection[docId] = collectionIndexRef[docId];
+						//return {startRange: startRange, endRange: endRange};
+					}
+				} else {
+					if (hash.lte(middlePoint)){
+						//Go to left-side child
+						left.addWithHash(hash, docId);
+					} else {
+						//Go to right-side child
+						right.addWithHash(hash, docId);
+					}
+				}
 			};
 
-			this.remove = function(docId){
-
+			thisNode.remove = function(docId){
+				var docIdHash = hasher(docId);
+				thisNode.removeWithHash(docIdHash, docId);
 			};
 
-			this.removeWithHash = function(hash, docId){
+			thisNode.removeWithHash = function(hash, docId){
+				if (!(hash instanceof Uint8Array && hash.length == 8) && !(hash instanceof Long)) throw new TypeError('hash must be a non-empty array of a Long instance');
+				if (hash instanceof Uint8Array){
+					hash = bufferBEToLong(hash);
+				}
 
+				if (isLeaf()){
+					currentCollectionSize -= getDocSize(subCollection[docId]);
+					delete subCollection[docId];
+					if (currentCollectionSize < maxBinWidth / 2){
+						mergeWithSibling();
+					}
+				} else {
+					if (hash.lte(middlePoint)){
+						left.removeWithHash(hash, docId);
+					} else {
+						right.removeWithHash(hash, docId);
+					}
+				}
 			};
 
-			this.range = function(){
+			thisNode.lookup = function(docId, hash){
+				if (thisNode.isLeaf()){
+					return subCollection[docId];
+				} else {
+					if (hash.lte(middlePoint)){
+						left.lookup(docId, hash);
+					} else {
+						right.lookup(docId, hash);
+					}
+				}
+			};
+
+			thisNode.range = function(){
 				return {start: startRange, end: endRange};
 			};
 
-			this.mergeWith = function(otherNode){
+			thisNode.getParent = function(){
+				return parent;
+			}
 
-			};
-
-			this.getLeft = function(){
+			thisNode.getLeft = function(){
 				return left;
 			};
 
-			this.getRight = function(){
+			thisNode.getRight = function(){
 				return right;
 			};
 
-			this.setLeft = function(l){
+			thisNode.setLeft = function(l){
 				if (l && !(l instanceof TreeNode)) throw new TypeError('l must be a tree node');
 				left = l;
 			};
 
-			this.setRight = function(r){
+			thisNode.setRight = function(r){
 				if (r && !(r instanceof TreeNode)) throw new TypeError('r must be a tree node');
 				right = r;
 			};
 
-			this.isLeaf = isLeaf;
+			thisNode.isLeaf = isLeaf;
 
-			this.getBinnedRange = function(){
-
-				var resultObject = {startRange: startRange, endRange: endRange};
-			}
+			thisNode.getBinnedRange = function(){
+				if (isLeaf()){
+					var resultObject = {start: startRange, end: endRange, subCollection: shallowCopy(subCollection)};
+					return resultObject;
+				} else {
+					var rightBinnedRange = thisNode.right.getBinnedRange();
+					var leftBinnedRange = thisNode.left.getBinnedRange();
+				}
+			};
 
 			function isLeaf(){
 				return !(left || right);
 			}
 
-			function mergeWith(otherNode){
+			function mergeWithSibling(){
+				if (!isLeaf()) return; //Cannot merge with sibling if you are not a leaf
+				if (!parent) return; //To have a sibling, you must have a parent
 
+				var isLeftNode = parent.getLeft() == thisNode;
+				var isRightNode = !isLeftNode;
+
+				var sibling = isLeftNode ? parent.getLeft() : parent.getRight();
+				if (!sibling.isLeaf()) return; //Give up the merge if sibling node is not also a leaf
+
+				var thisNodeRange = thisNode.range();
+				var siblingBinnedRange = sibling.getBinnedRange();
+
+				var mergedSubCollection = {};
+
+				var myDocList = Object.keys(subCollection);
+				for (var i = 0; i < myDocList.length; i++){
+					mergedSubCollection[myDocList[i]] = subCollection[myDocList[i]];
+				}
+
+				var siblingDocList = Object.keys(siblingBinnedRange.subCollection);
+				for (var i = 0; i < siblingDocList.length; i++){
+					mergedSubCollection[siblingDocList[i]] = siblingBinnedRange.subCollection[siblingDocList[i]];
+				}
+
+				parent.setRight(undefined);
+				parent.setLeft(undefined);
+				parent.setSubCollection(mergedSubCollection);
+
+				//trigger delete events for sub-ranges for this node and its sibling
+				triggerEv('delete', [getRangeString(thisNodeRange)]);
+				triggerEv('delete', [getRangeString(siblingBinnedRange)]);
+				triggerEv('change', [longToHex(parent.range())]);
+			}
+
+			function splitNode(){
+				var splitedRange = splitRange(startRange, endRange);
+				var leftRange = splitedRange[0], rightRange = splitedRange[1];
+				var leftNode = new TreeNode(leftRange.s, leftRange.e, null, thisNode);
+				var rightNode = new TreeNode(rightRange.s, rightRange.e, null, thisNode);
+
+				thisNode.setLeft(leftNode);
+				thisNode.setRight(rightNode);
+
+				//Split the data
+				//Clear data from this node
+				//Trigger events
+			}
+
+			function hashToLong(d){
+				if (typeof d == 'string'){
+					d = from_string(d);
+				}
+				return bufferBEToLong(hasher(d));
 			}
 		}
 
-		function estimateFragmentSize(n){
-			var totalFargmentSize = 0;
-			for (var i = 0; i < n._data.length; i++){
-				totalFargmentSize += jsonSize(collectionIndexRef[n._data[i]]);
-			}
-			return totalFargmentSize;
+		function getDocSize(docRef){
+			return typeof docRef == 'object' ? jsonSize(docRef) : jsonSize(collectionIndexRef[docRef]);
 		}
 
 		function findCommonPrefix(a, b){
@@ -2626,28 +2869,6 @@
 			return middle;
 		}
 
-		function bufferBEToLong(b){
-			var l, h = 0;
-			for (var i = 0; i < 4; i++){
-				h += b[i] << 8 * (4 - i);
-			}
-			for (var i = 0; i < 4; i++){
-				l += b[i+4] << 8 * (4 - i);
-			}
-			return new Long(h, l, true);
-		}
-
-		function longToBufferBE(l){
-			var b = new Uint8Array(8);
-			for (var i = 0; i < 4; i++){
-				b[i] = l.high >> 8 * (4 - i);
-			}
-			for (var i = 0; i < 4; i++){
-				b[i+4] = l.low >> 8 * (4 - i);
-			}
-			return b;
-		}
-
 		function incrRangeElement(a){
 			if (!(a instanceof Uint8Array)) throw new TypeError('A must be a Uint8Array');
 			a = copyBuffer(a);
@@ -2662,6 +2883,45 @@
 
 			return a;
 		}
+	}
+
+	function bufferBEToLong(b){
+		var l, h = 0;
+		for (var i = 0; i < 4; i++){
+			h += b[i] << 8 * (4 - i);
+		}
+		for (var i = 0; i < 4; i++){
+			l += b[i+4] << 8 * (4 - i);
+		}
+		return new Long(l, h, true);
+	}
+
+	function longToBufferBE(l){
+		var b = new Uint8Array(8);
+		for (var i = 0; i < 4; i++){
+			b[i] = l.high >> 8 * (4 - i);
+		}
+		for (var i = 0; i < 4; i++){
+			b[i+4] = l.low >> 8 * (4 - i);
+		}
+		return b;
+	}
+
+	function longToHex(l){
+		return to_hex(longToBufferBE(l));
+	}
+
+	function hexToLong(s){
+		return bufferBEToLong(from_hex(s));
+	}
+
+	function getRangeString(rangeObj){
+		return longToHex(rangeObj.start) + '_' + longToHex(rangeObj.end);
+	}
+
+	function getRangeFromString(rangeStr){
+		var rangeParts = rangeStr.split('_');
+		return {start: hexToLong(rangeParts[0]), end: hexToLong(rangeParts[1])};
 	}
 
 	function jsonSize(o){
