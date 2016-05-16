@@ -2502,6 +2502,10 @@
 	}
 
 	//B+ tree-like construction??
+	/**
+	* @private
+	* B+ tree-like construction, to be used as index splitting and search index for Lawncipher (on id and index attributes)
+	*/
 	function PearsonBPlusTree(maxBinWidth, hasher, collectionIndexRef){
 		//Maximum size of a bin. Ideally this number should represent the size of the data to be held by a single index fragment file
 		if (!(typeof maxBinWidth == 'number' && Math.floor(maxBinWidth) == maxBinWidth && maxBinWidth > 0)) throw new TypeError('maxBinWidth must be a strictly positive integer');
@@ -2512,13 +2516,18 @@
 
 		var self = this;
 
-		//The events that are called
-		//'changed', parameter: range
-		//'deleted', parameter: range
+		//The events that are triggered
+		//'change', parameters: range_string, subCollection
+		//'delete', parameters: range_string
 
 		var evHandlers = {};
 		var rootNode = new TreeNode(new Long(0x00000000, 0x00000000, true), new Long(0xFFFFFFFF, 0xFFFFFFFF, true));
 
+		/**
+		* Attach an event handler
+		* @param {String} eventName - name of the event. Possible values: 'change', 'delete'
+		* @param {Function} handler - the handler function to be called when the event is triggered
+		*/
 		self.on = function(eventName, handler){
 			if (!(typeof eventName == 'string' && eventName.length > 0)) throw new TypeError('eventName must be a string');
 			if (typeof handler != 'function') throw new TypeError('handler must be a function');
@@ -2530,6 +2539,11 @@
 			}
 		};
 
+		/**
+		* Detach a given event handler
+		* @param {String} eventName - name of the event
+		* @param {Function} [handler] - the handler to detach. If this parameter is omitted, all handlers for the given eventName will be detached
+		*/
 		self.off = function(eventName, handler){
 			if (!(typeof eventName == 'string' && eventName.length > 0)) throw new TypeError('eventName must be a string');
 			if (handler && typeof handler != 'function') throw new TypeError('when defined, handler must be a function');
@@ -2548,21 +2562,25 @@
 			}
 		};
 
-		self.add = function(docId){
-			if (!(typeof docId == 'string' && docId.length > 0)) throw new TypeError('docId must be a non-empty string');
+		/**
+		* Add a {key, value} pair to the tree
+		* @param {String|Number} key - the key (i.e, identifier) that will be used to retrieve the value from the tree
+		* @param {String|Object|Number} [value] - the data to be stored in the tree for the given key. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the current collection
+		*/
+		self.add = function(key, value){
+			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
-			rootNode.add(docId);
+			rootNode.add(key, value);
 		};
 
-		self.remove = function(docId){
-			if (!(typeof docId == 'string' && docId.length > 0)) throw new TypeError('docId must be a non-empty string');
+		self.remove = function(key, value){
+			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
-			rootNode.remove(docId);
+			rootNode.remove(key, value);
 		};
 
 		/**
 		* Insert tree data for a given range
-		* @private
 		* @param {String|Long|Uint8Array} startRange - the beginning of the data range to insert
 		* @param {String|Long|Uint8Array} endRange - the end of the data range to insert
 		* @param {Object} subCollection - the documents/tree data to insert
@@ -2586,27 +2604,58 @@
 			}
 			if (!(endRange instanceof Long)) throw new TypeError('endRange must be either a hex string, an 8 byte buffer, or a Long instance');
 
-			var currentParent = rootNode;
+			var currentNode = rootNode;
+			var currentNodeRange = currentNode.range();
+			var nextRanges = splitRange(currentNodeRange);
 			var isHolderOfRange = false;
 			do {
-
+				currentNodeRange = currentNode.range();
+				if (currentNodeRange.start.equals(startRange) && currentNodeRange.end.equals(endRange)){
+					isHolderOfRange = true;
+					currentNode.setSubCollection(subCollection);
+				} else {
+					var splittedRange = splitRange(currentNodeRange.start, currentNodeRange.end);
+					var newLeftNode = new TreeNode(splittedRange[0].start, splittedRange[1].end, undefined, currentNode);
+					var newRightNode = new TreeNode(splittedRange[1].start, splittedRange[1].end, undefined,currentNode)
+					if (isRangeContainedIn(splittedRange[0].start, splittedRange[0].end, startRange, endRange)){
+						currentNode = newLeftNode;
+					} else if (isRangeContainedIn(splittedRange[1].start, splittedRange[1].end, startRange, endRange)){
+						currentNode = newRightNode
+					} else {
+						console.error('Implementation is not complete!');
+						//if (!)
+						//What to do in case some index files are not evenly split? What to do with their data?
+						//As of now, this code below yells an error message in such case...
+						console.error('CRITICAL INTERNAL ERROR: ')
+						break;
+					}
+				}
 			} while (!isHolderOfRange);
 		};
 
-		self.lookup = function(docId, hash){
-			if (typeof docId != 'string') throw new TypeError('docId must be a string');
-			if (!hash){
-				hash = hasher(docId);
-				self.lookup(docId, hash);
-				return;
-			}
-			rootNode.lookup(docId, hash);
+		/**
+		* Retrieve an element given its key
+		* @param {String|Number} key
+		* @param {String|Uint8Array} [hash] - the Pearson hash of the given key
+		*/
+		self.lookup = function(key, hash){
+			if (!(typeof key == 'string' || typeof key == 'number')) throw new TypeError('key must be a string or number');
+
+			if (!hash) hash = hasher(key);
+
+			rootNode.lookup(key, hash);
 		};
 
-		self.getDistribution = function(){
+		/*self.getDistribution = function(){
 
-		};
+		};*/
 
+		/**
+		* @private
+		* @param {String} evName - name of the event
+		* @param {Array} args - list of the arguments to be passed to the event handler, if found
+		* @param {Object<Function>} [_handlers] - list of handler functions to call
+		*/
 		function triggerEv(evName, args, _handlers){
 			var hanlders = _handlers || evHandlers;
 			if (!handlers[evName]) return;
@@ -2617,6 +2666,13 @@
 			}
 		}
 
+		/**
+		* @private
+		* @param {Long} startRange - starting point (inclusive) of the data/hash range that this node (and its children) will hold
+		* @param {Long} endRange - end point (inclusive) of the data/hash range that this node (and its children) will hold
+		* @param {Object} [_subCollection] - pre-load of data to be held by this node
+		* @param {TreeNode} [_parent] - the node that is parent to this one
+		*/
 		function TreeNode(startRange, endRange, _subCollection, _parent){
 			if (!(startRange instanceof Long)) throw new TypeError('startRange must be a Long instance');
 			if (!(endRange instanceof Long)) throw new TypeError('endRange must be a Long instance');
@@ -2647,6 +2703,10 @@
 
 			thisNode._subCollection = subCollection;
 
+			/**
+			* Set the subCollection of data to be held by this tree node
+			* @param {Object} _subCollection - the data to be held by this node. In the form of {key: value}, or {key: [value1, value2, ...]}
+			*/
 			thisNode.setSubCollection = function(_subCollection){
 				if (typeof _subCollection != 'object') throw new TypeError('_subCollection must an object');
 				checkSubCollection(_subCollection, '_subCollection');
@@ -2659,78 +2719,107 @@
 				thisNode._subCollection = _subCollection;
 			};
 
-			//Add a docId in the tree, and return the range of the node that ended-up receiving that doc
-			thisNode.add = function(docId){
-				var docIdHash = hasher(docId);
-				thisNode.addWithHash(docIdHash, docId);
+			/**
+			* Add a key in the tree, with its value. If value is missing, key is assumed to be a docId
+			* @param {String|Number} key - the key (i.e, identifier) that will be used to retrieve the value from the tree
+			* @param {String|Number|Object} [value] - the data to be stored in the tree for the given key. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the current collection
+			*/
+			thisNode.add = function(key, value){
+				var keyHash = hasher(key);
+				thisNode.addWithHash(keyHash, key, value);
 			};
 
-			thisNode.addWithHash = function(hash, docId){
+			/**
+			* Add a {key, value} pair, provided the hash of key
+			* @param {Uint8Array} hash - Pearson hash of key
+			* @param {String|Number} key - the key to add to the tree
+			* @param {String|Number|Object} [value] - the value to be stored in the tree for the given {hash, key}. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the collection
+			*/
+			thisNode.addWithHash = function(hash, key, value){
 				if (!(hash instanceof Uint8Array && hash.length == 8) && !(hash instanceof Long)) throw new TypeError('hash must be a non-empty array or a Long instance');
 				if (hash instanceof Uint8Array){
 					hash = bufferBEToLong(hash);
 				}
 
 				if (isLeaf()){
-					var docSize = getDocSize(docId);
-					var newNodeSize = currentDataSize + docSize;
+					var newDataSize = jsonSize(value) || getDocSize(key);
+					var newNodeSize = currentDataSize + newDataSize;
 					if (newNodeSize >= maxBinWidth){
 						splitNode(noTrigger);
 						if (hash.lte(middlePoint)){
-							left.addWithHash(hash, docId);
+							left.addWithHash(hash, key, value);
 						} else {
-							right.addWithHash(hash, docId);
+							right.addWithHash(hash, key, value);
 						}
 					} else {
-						currentCollectionSize += docSize;
-						subCollection[docId] = collectionIndexRef[docId];
-						//return {startRange: startRange, endRange: endRange};
+						currentCollectionSize += newDataSize;
+						if (value){
+							if (subCollection[key]) subCollection[key].push(value);
+							else subCollection[key] = [value];
+						} else {
+							//No "value" -> key is docId -> docId is unique
+							subCollection[key] = collectionIndexRef[key];
+						}
 					}
 				} else {
 					if (hash.lte(middlePoint)){
 						//Go to left-side child
-						left.addWithHash(hash, docId);
+						left.addWithHash(hash, key, value);
 					} else {
 						//Go to right-side child
-						right.addWithHash(hash, docId);
+						right.addWithHash(hash, key, value);
 					}
 				}
 			};
 
-			thisNode.remove = function(docId){
-				var docIdHash = hasher(docId);
-				thisNode.removeWithHash(docIdHash, docId);
+			/**
+			* Remove
+			*/
+			thisNode.remove = function(key, value){
+				var keyHash = hasher(key);
+				thisNode.removeWithHash(keyHash, key, value);
 			};
 
-			thisNode.removeWithHash = function(hash, docId){
+			thisNode.removeWithHash = function(hash, key, value){
 				if (!(hash instanceof Uint8Array && hash.length == 8) && !(hash instanceof Long)) throw new TypeError('hash must be a non-empty array of a Long instance');
 				if (hash instanceof Uint8Array){
 					hash = bufferBEToLong(hash);
 				}
 
 				if (isLeaf()){
-					currentCollectionSize -= getDocSize(subCollection[docId]);
-					delete subCollection[docId];
+					var dataSizeToRemove = jsonSize(value) || getDocSize(key);
+					currentCollectionSize -= dataSizeToRemove;
+					if (value){
+						if (subCollection[key]){
+							if (subCollection[key].length == 1) delete subCollection[key];
+							else {
+								for (var i = 0; i < subCollection[key].length; i++) subCollection[key].splice(i, 1);
+							}
+						}
+					} else {
+						//No "value" -> key is docId -> docId is unique
+						delete subCollection[key];
+					}
 					if (currentCollectionSize < maxBinWidth / 2){
 						mergeWithSibling();
 					}
 				} else {
 					if (hash.lte(middlePoint)){
-						left.removeWithHash(hash, docId);
+						left.removeWithHash(hash, key, value);
 					} else {
-						right.removeWithHash(hash, docId);
+						right.removeWithHash(hash, key, value);
 					}
 				}
 			};
 
-			thisNode.lookup = function(docId, hash){
+			thisNode.lookup = function(key, hash){
 				if (thisNode.isLeaf()){
-					return subCollection[docId];
+					return subCollection[key];
 				} else {
 					if (hash.lte(middlePoint)){
-						left.lookup(docId, hash);
+						left.lookup(key, hash);
 					} else {
-						right.lookup(docId, hash);
+						right.lookup(key, hash);
 					}
 				}
 			};
@@ -2792,14 +2881,14 @@
 
 				var mergedSubCollection = {};
 
-				var myDocList = Object.keys(subCollection);
-				for (var i = 0; i < myDocList.length; i++){
-					mergedSubCollection[myDocList[i]] = subCollection[myDocList[i]];
+				var myValueList = Object.keys(subCollection);
+				for (var i = 0; i < myValueList.length; i++){
+					mergedSubCollection[myValueList[i]] = subCollection[myValueList[i]];
 				}
 
-				var siblingDocList = Object.keys(siblingBinnedRange.subCollection);
-				for (var i = 0; i < siblingDocList.length; i++){
-					mergedSubCollection[siblingDocList[i]] = siblingBinnedRange.subCollection[siblingDocList[i]];
+				var siblingValueList = Object.keys(siblingBinnedRange.subCollection);
+				for (var i = 0; i < siblingValueList.length; i++){
+					mergedSubCollection[siblingValueList[i]] = siblingBinnedRange.subCollection[siblingValueList[i]];
 				}
 
 				parent.setRight(undefined);
@@ -2809,7 +2898,7 @@
 				//trigger delete events for sub-ranges for this node and its sibling
 				triggerEv('delete', [getRangeString(thisNodeRange)]);
 				triggerEv('delete', [getRangeString(siblingBinnedRange)]);
-				triggerEv('change', [longToHex(parent.range())]);
+				triggerEv('change', [longToHex(parent.range()), mergedSubCollection]);
 			}
 
 			function splitNode(){
@@ -2833,6 +2922,8 @@
 				return bufferBEToLong(hasher(d));
 			}
 		}
+
+		self.TreeNode = TreeNode;
 
 		function getDocSize(docRef){
 			return typeof docRef == 'object' ? jsonSize(docRef) : jsonSize(collectionIndexRef[docRef]);
@@ -2867,6 +2958,10 @@
 			var rangeWidth = e.subtract(s);
 			var middle = s.add(rangeWidth.divide(2));
 			return middle;
+		}
+
+		function isRangeContainedIn(containerStart, containerEnd, start, end){
+			return containerStart.gte(start) && containerEnd.lte(end);
 		}
 
 		function incrRangeElement(a){
