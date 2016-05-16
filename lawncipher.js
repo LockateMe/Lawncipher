@@ -2501,7 +2501,6 @@
 		}
 	}
 
-	//B+ tree-like construction??
 	/**
 	* @private
 	* B+ tree-like construction, to be used as index splitting and search index for Lawncipher (on id and index attributes)
@@ -2641,7 +2640,7 @@
 		self.lookup = function(key, hash){
 			if (!(typeof key == 'string' || typeof key == 'number')) throw new TypeError('key must be a string or number');
 
-			if (!hash) hash = hasher(key);
+			if (!hash) hash = hashToLong(key);
 
 			rootNode.lookup(key, hash);
 		};
@@ -2731,7 +2730,7 @@
 
 			/**
 			* Add a {key, value} pair, provided the hash of key
-			* @param {Uint8Array} hash - Pearson hash of key
+			* @param {Uint8Array|Long} hash - Pearson hash of key
 			* @param {String|Number} key - the key to add to the tree
 			* @param {String|Number|Object} [value] - the value to be stored in the tree for the given {hash, key}. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the collection
 			*/
@@ -2774,12 +2773,20 @@
 
 			/**
 			* Remove a {key, value} pair from the tree
+			* @param {String|Number} key
+			* @param {String|Number|Object} [value]
 			*/
 			thisNode.remove = function(key, value){
 				var keyHash = hasher(key);
 				thisNode.removeWithHash(keyHash, key, value);
 			};
 
+			/**
+			* Remove a {key, value} pair from the tree
+			* @param {Uint8Array|Long} hash
+			* @param {String|Number} key
+			* @param {String|Number|Object} [value]
+			*/
 			thisNode.removeWithHash = function(hash, key, value){
 				if (!(hash instanceof Uint8Array && hash.length == 8) && !(hash instanceof Long)) throw new TypeError('hash must be a non-empty array of a Long instance');
 				if (hash instanceof Uint8Array){
@@ -2816,6 +2823,11 @@
 				}
 			};
 
+			/**
+			* Retrieve a key
+			* @param {String|Number} key
+			* @param {Long} hash
+			*/
 			thisNode.lookup = function(key, hash){
 				if (thisNode.isLeaf()){
 					return subCollection[key];
@@ -2828,39 +2840,71 @@
 				}
 			};
 
+			/**
+			* Get data range of tree node
+			* @returns {Object} {Long startRange, endRange}
+			*/
 			thisNode.range = function(){
 				return {start: startRange, end: endRange};
 			};
 
+			/**
+			* Get parent node of this tree node
+			* @returns {TreeNode|Null}
+			*/
 			thisNode.getParent = function(){
 				return parent;
 			}
 
+			/**
+			* Get left-side child
+			* @returns {TreeNode|Null}
+			*/
 			thisNode.getLeft = function(){
 				return left;
 			};
 
+			/**
+			* Get right-side child
+			* @returns {TreeNode|Null}
+			*/
 			thisNode.getRight = function(){
 				return right;
 			};
 
+			/**
+			* Set left-side child node
+			* @param {TreeNode} [l] - leave undefined to unset left-side child
+			*/
 			thisNode.setLeft = function(l){
 				if (l && !(l instanceof TreeNode)) throw new TypeError('l must be a tree node');
 				left = l;
 			};
 
+			/**
+			* Set right-side child node
+			* @param {TreeNode} [r] - leave undefined to unset right-side child
+			*/
 			thisNode.setRight = function(r){
 				if (r && !(r instanceof TreeNode)) throw new TypeError('r must be a tree node');
 				right = r;
 			};
 
+			/**
+			* Is this node a leaf node?
+			* @returns {Boolean} - true if it is a leaf node, false if it isn't
+			*/
 			thisNode.isLeaf = isLeaf;
 
+			/**
+			* @returns {Object} - {start, end, subCollection}
+			*/
 			thisNode.getBinnedRange = function(){
 				if (isLeaf()){
 					var resultObject = {start: startRange, end: endRange, subCollection: shallowCopy(subCollection)};
 					return resultObject;
 				} else {
+					throw 'Incomplete';
 					var rightBinnedRange = thisNode.right.getBinnedRange();
 					var leftBinnedRange = thisNode.left.getBinnedRange();
 				}
@@ -2914,6 +2958,7 @@
 				thisNode.setLeft(leftNode);
 				thisNode.setRight(rightNode);
 
+				throw 'Incomplete';
 				//Split the data
 				//Clear data from this node
 				//Trigger events
