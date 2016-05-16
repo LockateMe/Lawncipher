@@ -2787,6 +2787,8 @@
 				}
 
 				if (isLeaf()){
+					if (!subCollection[key]) return;
+
 					var dataSizeToRemove = jsonSize(value) || getDocSize(key);
 					currentCollectionSize -= dataSizeToRemove;
 					if (value){
