@@ -2791,7 +2791,12 @@
 					currentCollectionSize -= dataSizeToRemove;
 					if (value){
 						if (subCollection[key]){
-							for (var i = 0; i < subCollection[key].length; i++) if (subCollection[key][i] == value) subCollection[key].splice(i, 1);
+							for (var i = 0; i < subCollection[key].length; i++){
+								if (subCollection[key][i] == value){
+									subCollection[key].splice(i, 1);
+									break;
+								}
+							}
 						}
 					} else {
 						//No "value" -> key is docId -> docId is unique
