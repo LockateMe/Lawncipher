@@ -2773,7 +2773,7 @@
 			};
 
 			/**
-			* Remove
+			* Remove a {key, value} pair from the tree
 			*/
 			thisNode.remove = function(key, value){
 				var keyHash = hasher(key);
@@ -2791,10 +2791,7 @@
 					currentCollectionSize -= dataSizeToRemove;
 					if (value){
 						if (subCollection[key]){
-							if (subCollection[key].length == 1) delete subCollection[key];
-							else {
-								for (var i = 0; i < subCollection[key].length; i++) subCollection[key].splice(i, 1);
-							}
+							for (var i = 0; i < subCollection[key].length; i++) if (subCollection[key][i] == value) subCollection[key].splice(i, 1);
 						}
 					} else {
 						//No "value" -> key is docId -> docId is unique
