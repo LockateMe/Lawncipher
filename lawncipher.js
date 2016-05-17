@@ -2423,7 +2423,7 @@
 		if (typeof subCollection != 'object') throw new TypeError(varName + ' must be an object');
 		var docList = Object.keys(subCollection);
 		for (var i = 0; i < docList.length; i++){
-			if (!checkDocIndexObj(subCollection[docList[i]])){
+			if (!(checkDocIndexObj(subCollection[docList[i]]) || Array.isArray(subCollection[docList[i]]))){
 				console.error('Invalid subCollection element [' + docList[i] + ']: ' + JSON.stringify(subCollection[docList[i]]));
 			}
 		}
@@ -2757,8 +2757,10 @@
 							else subCollection[key] = [value];
 						} else {
 							//No "value" -> key is docId -> docId is unique
+							if (subCollection[key]) throw new Error('Key already taken');
 							subCollection[key] = collectionIndexRef[key];
 						}
+						triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
 					}
 				} else {
 					if (hash.lte(middlePoint)){
@@ -2812,7 +2814,10 @@
 						delete subCollection[key];
 					}
 					if (currentCollectionSize < maxBinWidth / 2){
+						//Do not trigger events from this method in this case. They will be triggered by the mergeWithSibling call
 						mergeWithSibling();
+					} else {
+						triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
 					}
 				} else {
 					if (hash.lte(middlePoint)){
@@ -2903,11 +2908,11 @@
 				if (isLeaf()){
 					var resultObject = {start: startRange, end: endRange, subCollection: shallowCopy(subCollection)};
 					return resultObject;
-				} else {
+				}/* else {
 					throw 'Incomplete';
 					var rightBinnedRange = thisNode.right.getBinnedRange();
 					var leftBinnedRange = thisNode.left.getBinnedRange();
-				}
+				}*/
 			};
 
 			function isLeaf(){
@@ -2958,10 +2963,27 @@
 				thisNode.setLeft(leftNode);
 				thisNode.setRight(rightNode);
 
-				throw 'Incomplete';
 				//Split the data
+				var subCollectionList = Object.keys(subCollection);
+				var leftSubCollection = {}, rightSubCollection = {};
+				for (var i = 0; i < subCollectionList.length; i++){
+					var currentHash = hashToLong(subCollectionList[i]);
+					if (isHashContainedIn(leftRange.s, leftRange.e, currentHash)){
+						leftSubCollection[subCollectionList[i]] = subCollection[subCollectionList[i]];
+					} else if (isHashContainedIn(rightRange.s, rightRange.e, currentHash)){
+						rightSubCollection[subCollectionList[i]] = subCollection[subCollectionList[i]];
+					} else {
+						console.error('Error in hash distribution');
+					}
+				}
+				leftNode.setSubCollection(leftSubCollection);
+				rightNode.setSubCollection(rightSubCollection);
 				//Clear data from this node
+				subCollection = null;
 				//Trigger events
+				triggetEv('delete', [getRangeString(thisNode.range())]);
+				triggerEv('change', [getRangeString(leftRange), leftSubCollection]);
+				triggerEv('change', [getRangeString(rightRange), rightSubCollection]);
 			}
 
 			function hashToLong(d){
@@ -3009,8 +3031,16 @@
 			return middle;
 		}
 
+		function rangeWidth(s, e){
+			return e.subtract(s).add(1); //end - start + 1
+		}
+
 		function isRangeContainedIn(containerStart, containerEnd, start, end){
 			return containerStart.gte(start) && containerEnd.lte(end);
+		}
+
+		function isHashContainedIn(containerStart, containerEnd, h){
+			return containerStart.gte(h) && containerEnd.lte(h);
 		}
 
 		function incrRangeElement(a){
@@ -3060,7 +3090,7 @@
 	}
 
 	function getRangeString(rangeObj){
-		return longToHex(rangeObj.start) + '_' + longToHex(rangeObj.end);
+		return longToHex(rangeObj.start || rangeObj.s) + '_' + longToHex(rangeObj.end || rangeObj.e);
 	}
 
 	function getRangeFromString(rangeStr){
