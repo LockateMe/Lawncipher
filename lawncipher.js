@@ -144,9 +144,77 @@
 	var permittedIndexTypes = ['string', 'date', 'number', 'boolean', 'object', 'array', 'buffer', '*'];
 	var purgeIntervalValue = 5000;
 
-	var maxIndexChunkSize = 1 << 21; //(2 ^ 21). Lawncipher prevents itself from writing enourmous index files. If the unencrypted index file exceeds this size (in unencrypted state), it will be chunked.
+	/*
+	Lawncipher prevents itself from writing enourmous index files.
+	If the unencrypted index file exceeds this size (in unencrypted state),
+	it will be chunked by the main PearsonBPlusTree.
+	*/
+	var maxIndexChunkSize = 51200; //(50 * 1024) bytes
 
-	var indexNamesRegex = /^_index(?:\d+)?$/g;
+	function indexNameRegexBuilder(indexName){
+		var regexStr = '^_';
+		if (!indexName || indexName == 'index'){
+			regexStr += 'index';
+		} else {
+			regexStr += '_' + indexName;
+		}
+		regexStr += '(:?_(?:[a-f]|[0-9]){16}_(?:[a-f]|[0-9]){16})?$';
+
+		return new RegExp(regexStr, 'gi');
+	}
+
+	function indexNameParser(indexName){
+		var indexNameCheck = indexNameRegexBuilder(indexName);
+
+		return function(fileName){
+			if (!indexNameCheck.test(fileName)) return;
+
+			var result = {};
+			var extractedAttributes = 0;
+
+			var fileNameParts = fileName.split(/_+/g);
+			for (var i = 0; i < fileNameParts.length; i++){
+				if (fileNameParts[i] == '') continue;
+				if (extractedAttributes == 0){ //Index name
+					result.name = fileNameParts[i];
+				} else if (extractedAttributes == 1){ //Range start
+					try {
+						result.rangeStart = hexToLong(fileNameParts[i])
+					} catch (e){
+						throw new Error(fileNameParts[i] + ' cannot be parsed to a Long');
+					}
+				} else if (extractedAttributes == 2){ //Range end
+					try {
+						result.rangeEnd = hexToLong(fileNameParts[i]);
+					} catch (e){
+						throw new Error(fileNameParts[i] + ' cannot be parsed to a Long');
+					}
+					break;
+				}
+				extractedAttributes++;
+			}
+
+			return result;
+		}
+	}
+
+	var indexNamesRegex = indexNameRegexBuilder(); //Default/main index files regex
+
+	function indexNameBuilder(indexName, rangeStart, rangeEnd){
+		if (indexName && typeof indexName != 'string') throw new TypeError('when defined, indexName must be a string');
+		if (!(rangeStart instanceof Long)) throw new TypeError('rangeStart must be a Long');
+		if (!(rangeEnd instanceof Long)) throw new TypeError('rangeEnd must be a Long');
+
+		var nameStr = '_';
+		if (!indexName || indexName == 'index'){
+			nameStr += 'index';
+		} else {
+			nameStr += '_' + indexName;
+		}
+		nameStr += '_' + longToHex(rangeStart) + '_' + longToHex(rangeEnd);
+
+		return nameStr;
+	}
 
 	/*
 	* Scrypt provider must have the following interface
@@ -331,19 +399,22 @@
 					return;
 				}
 
-				var endCount = 0;
+				//var endCount = 0;
 
+				//This loop has async-only behavior, hence the async-handling code in this method is useless and commented out
 				for (var i = 0; i < rootIndex.length; i++){
 					loadOne(rootIndex[i]);
 				}
 
-				function endLoad(){
+				callback();
+
+				/*function endLoad(){
 					endCount++;
 					if (endCount == rootIndex.length){
 						//console.log('Collections loaded');
 						callback();
 					}
-				}
+				}*/
 
 				function loadOne(c){
 					var missingVarName;
@@ -351,14 +422,14 @@
 					if (!c['key']) messageVarName = 'key;'
 					if (missingVarName){
 						console.error('Missing variable ' + missingVarName + ' from collection description ' + JSON.stringify(c));
-						endCount++;
-						endLoad();
-						return;
+						//endCount++;
+						//endLoad();
+						//return;
 					}
 
 					//Default TTL parameter to be included here as well??
 
-					endLoad();
+					//endLoad();
 					//Why async-like code when behavior is sync?
 				}
 			}
@@ -728,12 +799,26 @@
 									return;
 								}
 
-								//Deserialize every object in the index
-								documentsIndex = {indexModel: serializedIndex.indexModel, documents: {}, docCount: serializedIndex.docCount, collectionSize: serializedIndex.collectionSize};
-								var docsIds = Object.keys(serializedIndex.documents);
-								for (var i = 0; i < docsIds.length; i++){
-									documentsIndex.documents[docsIds[i]] = clone(serializedIndex.documents[docsIds[i]]);
-									documentsIndex.documents[docsIds[i]].index = deserializeObject(documentsIndex.documents[docsIds[i]].index);
+								var migratingToV1_1 = false;
+
+								if (!serializedIndex.pearsonSeed){
+									migratingToV1_1 = true;
+									serializedIndex.pearsonSeed = PearsonSeedGenerator();
+								}
+
+								//Deserialize every object in the index.
+								documentsIndex = {indexModel: serializedIndex.indexModel, documents: {}, docCount: serializedIndex.docCount, collectionSize: serializedIndex.collectionSize, pearsonSeed: serializedIndex.pearsonSeed};
+
+								if (migratingToV1_1){
+									var docsIds = Object.keys(serializedIndex.documents);
+									for (var i = 0; i < docsIds.length; i++){
+										documentsIndex.documents[docsIds[i]] = clone(serializedIndex.documents[docsIds[i]]);
+										documentsIndex.documents[docsIds[i]].index = deserializeObject(documentsIndex.documents[docsIds[i]].index);
+									}
+
+									//Insert in tree
+								} else {
+									//Load tree
 								}
 
 								//Checking that if an indexModel is provided as a parameter of this call, it hasn't changed with the one already saved on file.
@@ -2202,7 +2287,7 @@
 		r = r || 8;
 		p = p || 1;
 
-		fileFormatVersion = fileFormatVersion || 0x00;
+		fileFormatVersion = fileFormatVersion || 0x01;
 
 		if (!(typeof opsLimit == 'number' && Math.floor(opsLimit) == opsLimit && opsLimit > 0)) throw new TypeError('when defined, opsLimit must be a strictly positive integer number');
 		if (!(typeof r == 'number' && Math.floor(r) == r && r > 0)) throw new TypeError('when defined, r must be a strictly positive integer number');
@@ -2304,7 +2389,7 @@
 		rIndex++;
 		minRemainingSize--;
 
-		if (fileFormatVersion != 0x00) throw new Error('Unsupported file format version: ' + fileFormatVersion + '. Please use a newer version of Lawncipher');
+		if (!(fileFormatVersion == 0x00 || fileFormatVersion == 0x01)) throw new Error('Unsupported file format version: ' + fileFormatVersion + '. Please use a newer version of Lawncipher');
 
 		//Reading r
 		r = (buffer[rIndex] << 8) + buffer[rIndex+1];
@@ -2440,6 +2525,47 @@
 		return bCopy;
 	}
 
+	function Index(rootPath, collectionName, indexName, rootKey, pearsonSeed, collectionIndexRef, loadCallback){
+		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('collectionName must be a non-empty string');
+		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('indexName must be a non-empty string');
+		if (!(rootKey instanceof Uint8Array && rootKey.length == 32)) throw new TypeError('rootKey must be a 32-byte Uint8Array');
+		if (!(Array.isArray(pearsonSeed) && pearsonSeed.length == 256)) throw new TypeError('pearsonSeed must be an array containing a permutation of integers in the range [0; 255]');
+		if (!(collectionIndexRef && typeof collectionIndexRef == 'object')) throw new TypeError('collectionIndexRef must be an object');
+		if (typeof loadCallback != 'function') throw new TypeError('loadCallback must be a function');
+
+		var self = this;
+
+		var collectionPath = pathJoin(rootPath, collectionName);
+
+		var fragmentNameMatcher = indexNameRegexBuilder(indexName);
+		var fragmentsList = [];
+
+		fs.readdir(collectionPath, function(err, collectionDirList){
+			if (err){
+				loadCallback(err);
+				return;
+			}
+
+			for (var i = 0; i < collectionDirList.length; i++){
+				if (fragmentNameMatcher.test(collectionDirList[i])){
+
+				}
+			}
+		});
+
+		self.lookup = function(key){
+
+		};
+
+		self.add = function(key, value){
+
+		};
+
+		self.remove = function(key, value){
+
+		};
+	}
+
 	function PearsonSeedGenerator(){
 		var orderingRandomData = randomBuffer(1024); //256 * 4
 		var orderingArray = new Array(256);
@@ -2504,8 +2630,11 @@
 	/**
 	* @private
 	* B+ tree-like construction, to be used as index splitting and search index for Lawncipher (on id and index attributes)
+	* Example (and intended) uses:
+	* -central collection index. Key : docId. Value : document
+	* -search tree for an attribute in the index model. Key : attributeValue. Value : matching docIDs
 	*/
-	function PearsonBPlusTree(maxBinWidth, hasher, collectionIndexRef){
+	function PearsonBPlusTree(maxBinWidth, hasher, collectionIndexRef, disallowKeyCollisions){
 		//Maximum size of a bin. Ideally this number should represent the size of the data to be held by a single index fragment file
 		if (!(typeof maxBinWidth == 'number' && Math.floor(maxBinWidth) == maxBinWidth && maxBinWidth > 0)) throw new TypeError('maxBinWidth must be a strictly positive integer');
 		//The function retruned from PearsonHasher()
@@ -2514,6 +2643,8 @@
 		if (typeof collectionIndexRef != 'object') throw new TypeError('collectionIndexRef must be an object');
 
 		var self = this;
+
+		var untriggeredEvents = [];
 
 		//The events that are triggered
 		//'change', parameters: range_string, subCollection
@@ -2561,21 +2692,54 @@
 			}
 		};
 
+		//Event postponing is used if timeouts are not
+		self.triggerUntriggeredEvents = function(){
+			var changeEvents = {}; //{rangeId, subCollectionRef}
+			var deleteEvents = {}; //{rangeId, true}
+			//Roll-up the events log
+			for (var i = 0; i < untriggeredEvents.length; i++){
+				var currEvent = untriggeredEvents[i];
+				if (currEvent._change){
+					changeEvents[currEvent.rangeStr] = currEvent.subCollection;
+					if (deleteEvents[currEvent.rangeStr]) delete deleteEvents[currEvent.rangeStr];
+				} else if (currEvent._delete){
+					deleteEvents[currEvent.rangeStr] = true;
+					if (changeEvents[currEvent.rangeStr]) delete changeEvents[currEvent.rangeStr];
+				}
+			}
+			//Trigger the postponed events
+			var changeList = Object.keys(changeEvents);
+			for (var i = 0; i < changeList.length; i++){
+				triggerEv('change', [changeList[i], changeEvents[changeList[i]]]);
+			}
+			var deleteList = Object.keys(deleteEvents);
+			for (var i = 0; i < deleteList.length; i++){
+				triggerEv('delete', [deleteList[i]]);
+			}
+		};
+
+		self.clearUntriggeredEvents = function(){
+			untriggeredEvents = [];
+		};
+
 		/**
 		* Add a {key, value} pair to the tree
 		* @param {String|Number} key - the key (i.e, identifier) that will be used to retrieve the value from the tree
 		* @param {String|Object|Number} [value] - the data to be stored in the tree for the given key. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the current collection
 		*/
-		self.add = function(key, value){
+		self.add = function(key, value, noTrigger){
 			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
-			rootNode.add(key, value);
+			var valType = typeof value;
+			if (!(valType == 'string' && valType == 'numebr' && valType == 'object')) throw new TypeError('value must either be a string, a number, or a JSON object');
+
+			rootNode.add(key, value, noTrigger);
 		};
 
 		self.remove = function(key, value){
 			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
-			rootNode.remove(key, value);
+			rootNode.remove(key, value, noTrigger);
 		};
 
 		/**
@@ -2723,9 +2887,9 @@
 			* @param {String|Number} key - the key (i.e, identifier) that will be used to retrieve the value from the tree
 			* @param {String|Number|Object} [value] - the data to be stored in the tree for the given key. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the current collection
 			*/
-			thisNode.add = function(key, value){
+			thisNode.add = function(key, value, noTrigger){
 				var keyHash = hasher(key);
-				thisNode.addWithHash(keyHash, key, value);
+				thisNode.addWithHash(keyHash, key, value, noTrigger);
 			};
 
 			/**
@@ -2734,7 +2898,7 @@
 			* @param {String|Number} key - the key to add to the tree
 			* @param {String|Number|Object} [value] - the value to be stored in the tree for the given {hash, key}. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the collection
 			*/
-			thisNode.addWithHash = function(hash, key, value){
+			thisNode.addWithHash = function(hash, key, value, noTrigger){
 				if (!(hash instanceof Uint8Array && hash.length == 8) && !(hash instanceof Long)) throw new TypeError('hash must be a non-empty array or a Long instance');
 				if (hash instanceof Uint8Array){
 					hash = bufferBEToLong(hash);
@@ -2746,9 +2910,9 @@
 					if (newNodeSize >= maxBinWidth){
 						splitNode(noTrigger);
 						if (hash.lte(middlePoint)){
-							left.addWithHash(hash, key, value);
+							left.addWithHash(hash, key, value, noTrigger);
 						} else {
-							right.addWithHash(hash, key, value);
+							right.addWithHash(hash, key, value, noTrigger);
 						}
 					} else {
 						currentCollectionSize += newDataSize;
@@ -2760,15 +2924,20 @@
 							if (subCollection[key]) throw new Error('Key already taken');
 							subCollection[key] = collectionIndexRef[key];
 						}
-						triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
+
+						if (noTrigger){
+							untriggeredEvents.push({_change: true, rangeStr: getRangeString(thisNode.range()), subCollection: subCollection});
+						} else {
+							triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
+						}
 					}
 				} else {
 					if (hash.lte(middlePoint)){
 						//Go to left-side child
-						left.addWithHash(hash, key, value);
+						left.addWithHash(hash, key, value, noTrigger);
 					} else {
 						//Go to right-side child
-						right.addWithHash(hash, key, value);
+						right.addWithHash(hash, key, value, noTrigger);
 					}
 				}
 			};
@@ -2778,9 +2947,9 @@
 			* @param {String|Number} key
 			* @param {String|Number|Object} [value]
 			*/
-			thisNode.remove = function(key, value){
+			thisNode.remove = function(key, value, noTrigger){
 				var keyHash = hasher(key);
-				thisNode.removeWithHash(keyHash, key, value);
+				thisNode.removeWithHash(keyHash, key, value, noTrigger);
 			};
 
 			/**
@@ -2789,7 +2958,7 @@
 			* @param {String|Number} key
 			* @param {String|Number|Object} [value]
 			*/
-			thisNode.removeWithHash = function(hash, key, value){
+			thisNode.removeWithHash = function(hash, key, value, noTrigger){
 				if (!(hash instanceof Uint8Array && hash.length == 8) && !(hash instanceof Long)) throw new TypeError('hash must be a non-empty array of a Long instance');
 				if (hash instanceof Uint8Array){
 					hash = bufferBEToLong(hash);
@@ -2815,15 +2984,19 @@
 					}
 					if (currentCollectionSize < maxBinWidth / 2){
 						//Do not trigger events from this method in this case. They will be triggered by the mergeWithSibling call
-						mergeWithSibling();
+						mergeWithSibling(noTrigger);
 					} else {
-						triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
+						if (noTrigger){
+							untriggeredEvents.push({_delete: true, rangeStr: getRangeString(thisNode.range())});
+						} else {
+							triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
+						}
 					}
 				} else {
 					if (hash.lte(middlePoint)){
-						left.removeWithHash(hash, key, value);
+						left.removeWithHash(hash, key, value, noTrigger);
 					} else {
-						right.removeWithHash(hash, key, value);
+						right.removeWithHash(hash, key, value, noTrigger);
 					}
 				}
 			};
@@ -2919,7 +3092,7 @@
 				return !(left || right);
 			}
 
-			function mergeWithSibling(){
+			function mergeWithSibling(noTrigger){
 				if (!isLeaf()) return; //Cannot merge with sibling if you are not a leaf
 				if (!parent) return; //To have a sibling, you must have a parent
 
@@ -2949,12 +3122,14 @@
 				parent.setSubCollection(mergedSubCollection);
 
 				//trigger delete events for sub-ranges for this node and its sibling
-				triggerEv('delete', [getRangeString(thisNodeRange)]);
-				triggerEv('delete', [getRangeString(siblingBinnedRange)]);
-				triggerEv('change', [longToHex(parent.range()), mergedSubCollection]);
+				if (!noTrigger){
+					triggerEv('delete', [getRangeString(thisNodeRange)]);
+					triggerEv('delete', [getRangeString(siblingBinnedRange)]);
+					triggerEv('change', [longToHex(parent.range()), mergedSubCollection]);
+				}
 			}
 
-			function splitNode(){
+			function splitNode(noTrigger){
 				var splitedRange = splitRange(startRange, endRange);
 				var leftRange = splitedRange[0], rightRange = splitedRange[1];
 				var leftNode = new TreeNode(leftRange.s, leftRange.e, null, thisNode);
@@ -2981,9 +3156,11 @@
 				//Clear data from this node
 				subCollection = null;
 				//Trigger events
-				triggetEv('delete', [getRangeString(thisNode.range())]);
-				triggerEv('change', [getRangeString(leftRange), leftSubCollection]);
-				triggerEv('change', [getRangeString(rightRange), rightSubCollection]);
+				if (!noTrigger){
+					triggerEv('delete', [getRangeString(thisNode.range())]);
+					triggerEv('change', [getRangeString(leftRange), leftSubCollection]);
+					triggerEv('change', [getRangeString(rightRange), rightSubCollection]);
+				}
 			}
 
 			function hashToLong(d){
