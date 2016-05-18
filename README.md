@@ -248,7 +248,7 @@ Lawncipher checks for expired docs every 5 seconds
 
 ```
 [
- 	{name: 'collection_name', scrypt: {r, p, opsLimit}},
+ 	{name: 'collection_name', key: ''},
  	...
 ]
 ```
@@ -258,16 +258,38 @@ Lawncipher checks for expired docs every 5 seconds
 ```
 {
 	indexModel: indexModelObjectOrArray,
+    docCount: numberOfDocsInCollection,
+    collectionSize: collectionSizeInBytes,
 	documents: {
-		"docId": {
-			index: {extractedOrProvidedData},
-			blobType: 'string|buffer|json'
-			k: blob/file encryption key, //Optional. Only if the first `blob` parameter is provided when saving the document
-			ttl: Time-to-live for the document. Unixepoch, in seconds. Optional
-		},
+		"docId": documentIndexObject,
 		...
-	}
+	},
+    pearsonSeed: [0-255 permutation]
 
+}
+```
+
+__NOTE:__ the `documents` attribute in the model above is removed as soon as the collection begins to use index file fragmentation.
+
+### Collection index fragment file model:
+
+```
+{
+    docId: documentIndexObject,
+    ...
+}
+```
+
+### Document index object model (`documentIndexObject`)
+
+The object that describes a document in the index
+
+```
+{
+    index: {extractedOrProvidedData},
+    blobType: 'string|buffer|json' //Optional
+    k: blob/file encryption key, //Optional. Only if the first `blob` parameter is provided when saving the document
+    ttl: Time-to-live for the document. Unixepoch, in seconds. Optional
 }
 ```
 
