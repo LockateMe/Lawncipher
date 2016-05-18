@@ -2701,10 +2701,10 @@
 				var currEvent = untriggeredEvents[i];
 				if (currEvent._change){
 					changeEvents[currEvent.rangeStr] = currEvent.subCollection;
-					if (deleteEvents[currEvent.rangeStr]) delete deleteEvents[currEvent.rangeStr];
+					delete deleteEvents[currEvent.rangeStr];
 				} else if (currEvent._delete){
 					deleteEvents[currEvent.rangeStr] = true;
-					if (changeEvents[currEvent.rangeStr]) delete changeEvents[currEvent.rangeStr];
+					delete changeEvents[currEvent.rangeStr];
 				}
 			}
 			//Trigger the postponed events
