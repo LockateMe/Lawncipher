@@ -1495,8 +1495,8 @@
 				fs.writeFile(indexFilePath, docsIndexFile, cb);
 			}
 
-			function getIndexFileName(startRange, endRange){
-				return '_index_' + to_hex(longToBufferBE(startRange)) + '_' + to_hex(longToBufferBE(endRange));
+			function getIndexFileName(r){
+				return '_index_' + to_hex(longToBufferBE(r.start)) + '_' + to_hex(longToBufferBE(r.end));
 			}
 
 			function applyQuery(query, dataset, limit, matchFunction, includePureBlobs){
@@ -2525,10 +2525,10 @@
 		return bCopy;
 	}
 
-	function Index(rootPath, collectionName, indexName, rootKey, pearsonSeed, collectionIndexRef, loadCallback){
+	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, collectionIndexRef, loadCallback){
 		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('collectionName must be a non-empty string');
 		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('indexName must be a non-empty string');
-		if (!(rootKey instanceof Uint8Array && rootKey.length == 32)) throw new TypeError('rootKey must be a 32-byte Uint8Array');
+		if (!(collectionKey instanceof Uint8Array && collectionKey.length == 32)) throw new TypeError('collectionKey must be a 32-byte Uint8Array');
 		if (!(Array.isArray(pearsonSeed) && pearsonSeed.length == 256)) throw new TypeError('pearsonSeed must be an array containing a permutation of integers in the range [0; 255]');
 		if (!(collectionIndexRef && typeof collectionIndexRef == 'object')) throw new TypeError('collectionIndexRef must be an object');
 		if (typeof loadCallback != 'function') throw new TypeError('loadCallback must be a function');
@@ -2537,7 +2537,12 @@
 
 		var collectionPath = pathJoin(rootPath, collectionName);
 
+		//If indexName == 'index' or '_index', meaning that this index is central collection
+		//Else, this index is an attribute search index. Hence, nodes have to allow multiple values for a given key
+		var attributeIndex = !(indexName == 'index');
+
 		var fragmentNameMatcher = indexNameRegexBuilder(indexName);
+		var fragmentNameBuilder = indexNameBuilder(indexName);
 		var fragmentsList = [];
 
 		fs.readdir(collectionPath, function(err, collectionDirList){
@@ -2553,7 +2558,10 @@
 			}
 		});
 
-		self.lookup = function(key){
+		self.lookup = function(key, cb){
+			if (!(typeof key == 'string' || typeof key == 'number')) throw new TypeError('key must be a string or a number');
+			if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
 
 		};
 
@@ -2642,6 +2650,8 @@
 		//Reference to the collections index. Useful to estimate JSON/doc size
 		if (typeof collectionIndexRef != 'object') throw new TypeError('collectionIndexRef must be an object');
 
+		maxBinWidth = maxBinWidth || 53248; // 13 * 4096 (hoping to match 4096 block sizes)
+
 		var self = this;
 
 		var untriggeredEvents = [];
@@ -2722,6 +2732,10 @@
 			untriggeredEvents = [];
 		};
 
+		self.getUntriggeredEvents = function(){
+			return untriggeredEvents;
+		};
+
 		/**
 		* Add a {key, value} pair to the tree
 		* @param {String|Number} key - the key (i.e, identifier) that will be used to retrieve the value from the tree
@@ -2748,7 +2762,9 @@
 		* @param {String|Long|Uint8Array} endRange - the end of the data range to insert
 		* @param {Object} subCollection - the documents/tree data to insert
 		*/
-		self.insertRange = function(startRange, endRange, subCollection){
+		self.insertRange = function(insertRange, subCollection){
+			if (!(insertRange instanceof PearsonRange)) throw new TypeError('insertRange must be a PearsonRange instance');
+			/*
 			if (typeof startRange == 'string'){
 				if (!(startRange.length == 16 && is_hex(startRange))) throw new TypeError('when startRange is a string, it must be a hex representation of a long (i.e, 8 bytes -> 16 hex chars)');
 				startRange = from_hex(startRange);
@@ -2766,35 +2782,88 @@
 				endRange = bufferBEToLong(endRange);
 			}
 			if (!(endRange instanceof Long)) throw new TypeError('endRange must be either a hex string, an 8 byte buffer, or a Long instance');
+			*/
 
 			var currentNode = rootNode;
-			var currentNodeRange = currentNode.range();
-			var nextRanges = splitRange(currentNodeRange);
+			var currentNodeRange, nextRanges;
 			var isHolderOfRange = false;
 			do {
 				currentNodeRange = currentNode.range();
-				if (currentNodeRange.start.equals(startRange) && currentNodeRange.end.equals(endRange)){
+				nextRanges = currentNodeRange.split();
+				if (currentNodeRange.equals(insertRange)){
 					isHolderOfRange = true;
 					currentNode.setSubCollection(subCollection);
 				} else {
 					var splittedRange = splitRange(currentNodeRange.start, currentNodeRange.end);
-					var newLeftNode = new TreeNode(splittedRange[0].start, splittedRange[1].end, undefined, currentNode);
-					var newRightNode = new TreeNode(splittedRange[1].start, splittedRange[1].end, undefined,currentNode)
-					if (isRangeContainedIn(splittedRange[0].start, splittedRange[0].end, startRange, endRange)){
-						currentNode = newLeftNode;
-					} else if (isRangeContainedIn(splittedRange[1].start, splittedRange[1].end, startRange, endRange)){
-						currentNode = newRightNode
+					var leftNode, rightNode;
+					if (isLeaf()){
+						var newLeftNode = new TreeNode(splittedRange[0].start, splittedRange[1].end, undefined, currentNode);
+						var newRightNode = new TreeNode(splittedRange[1].start, splittedRange[1].end, undefined,currentNode)
+						//Referencing children nodes to parent
+						thisNode.setLeft(newLeftNode);
+						thisNode.setRight(newRightNode);
+						//Setting leftNode and rightNode with the newly created nodes
+						leftNode = newLeftNode;
+						rightNode = newRightNode;
 					} else {
-						console.error('Implementation is not complete!');
-						//if (!)
-						//What to do in case some index files are not evenly split? What to do with their data?
-						//As of now, this code below yells an error message in such case...
-						console.error('CRITICAL INTERNAL ERROR: ')
-						break;
+						leftNode = thisNode.getLeft();
+						rightNode = thisNode.getRight();
+					}
+
+					if (isRangeContainedIn(splittedRange[0].start, splittedRange[0].end, insertRange.start, insertRange.end)){
+						currentNode = leftNode;
+					} else if (isRangeContainedIn(splittedRange[1].start, splittedRange[1].end, startRange, endRange)){
+						currentNode = rightNode
+					} else {
+						//Handles the case that insertRange is not an evenly cut range
+						if (!(insertRange.isContainedIn(nextRanges[0]) || insertRange.isContainedIn(nextRanges[1]))){
+							isHolderOfRange = true;
+							currentNode.mergeSubCollection(subCollection, !disallowKeyCollisions)
+						} else {
+							console.error('CRITICAL INTERNAL ERROR : your ranges are messed up')
+							break;
+						}
 					}
 				}
 			} while (!isHolderOfRange);
 		};
+
+		self.trimRange = function(tRange){
+			if (!(tRange instanceof PearsonRange)) throw new TypeError('tRange must be a PearsonRange instance');
+
+			var currentNode = rootNode;
+			var currentNodeRange;
+			var isHolderOfRange = false;
+
+			do {
+				currentNodeRange = currentNode.range();
+				if (currentNodeRange.equals(tRange)){
+					if (currentNode == rootNode){ //If we are still at the root node, trimming will result in de-referencing the subCollection the root node contains
+						rootNode.setSubCollection({});
+					} else {
+						var nodeParent = currentNode.getParent();
+						if (nodeParent.getRight() == currentNode){ //Current node is its parent's right child
+							nodeParent.setRight(); //De-referencing the node
+						} else if (nodeParent.getLeft() == currentNode){ //Current node is its parent's left child
+							nodeParent.setLeft(); //De-referencing the node
+						} else {
+							console.error('What the hell. Your parent is denying your existence.');
+							return;
+						}
+					}
+				} else {
+					var nextRanges = currentNodeRange.split();
+					if (nextRanges[0].contains(tRange)){
+						currentNode = currentNode.getLeft();
+					} else if (nextRanges[1].contains(tRange)){
+						currentNode = currentNode.getRight();
+					} else {
+						console.error('You got lost');
+						return;
+					}
+				}
+			} while (!isHolderOfRange);
+		}
 
 		/**
 		* Retrieve an element given its key
@@ -2831,14 +2900,12 @@
 
 		/**
 		* @private
-		* @param {Long} startRange - starting point (inclusive) of the data/hash range that this node (and its children) will hold
-		* @param {Long} endRange - end point (inclusive) of the data/hash range that this node (and its children) will hold
+		* @param {PearsonRange} dataRange - hash range that this node (and its children) will hold
 		* @param {Object} [_subCollection] - pre-load of data to be held by this node
 		* @param {TreeNode} [_parent] - the node that is parent to this one
 		*/
-		function TreeNode(startRange, endRange, _subCollection, _parent){
-			if (!(startRange instanceof Long)) throw new TypeError('startRange must be a Long instance');
-			if (!(endRange instanceof Long)) throw new TypeError('endRange must be a Long instance');
+		function TreeNode(dataRange, _subCollection, _parent){
+			if (!(dataRange instanceof PearsonRange)) throw new TypeError('dataRange must be a PearsonRange instance');
 			if (_subCollection){
 				if (typeof _subCollection != 'object') throw new TypeError('when defined, _subCollection must be an object');
 				checkSubCollection(_subCollection, '_subCollection');
@@ -2854,7 +2921,7 @@
 
 			var thisNode = this;
 
-			var middlePoint = midRange(startRange, endRange);
+			var middlePoint = dataRange.midRange();
 			var subCollection = _subCollection || {};
 			var currentDataSize = 0;
 
@@ -2880,6 +2947,32 @@
 
 				subCollection = _subCollection;
 				thisNode._subCollection = _subCollection;
+			};
+
+			thisNode.mergeSubCollection = function(_subCollection, replaceOnCollision){
+				if (typeof _subCollection == 'object') throw new TypeError('_subCollection must be an object');
+				checkSubCollection(_subCollection, '_subCollection');
+
+				if (!isLeaf()){
+					throw new Error('Node cannot receive subCollection if not leaf');
+				}
+
+				var keysToMerge = Object.keys(_subCollection);
+				for (var i = 0; i < _subCollection.length; i++){
+					if (subCollection[keysToMerge[i]]){
+						if (disallowKeyCollisions){
+							if (replaceOnCollision) subCollection[keysToMerge[i]] = _subCollection[keysToMerge[i]];
+							else throw new Error('Index already contains element with key ' + keysToMerge[i]);
+						} else {
+							var collisionningValues = _subCollection[keysToMerge[i]];
+							for (var j = 0; j < collisionningValues.length; j++){
+								subCollection[keysToMerge[i]].push(collisionningValues[j]);
+							}
+						}
+					} else {
+						subCollection[keysToMerge[i]] = _subCollection[keysToMerge[i]];
+					}
+				}
 			};
 
 			/**
@@ -2928,6 +3021,7 @@
 						if (noTrigger){
 							untriggeredEvents.push({_change: true, rangeStr: getRangeString(thisNode.range()), subCollection: subCollection});
 						} else {
+							self.triggerUntriggeredEvents();
 							triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
 						}
 					}
@@ -2989,6 +3083,7 @@
 						if (noTrigger){
 							untriggeredEvents.push({_delete: true, rangeStr: getRangeString(thisNode.range())});
 						} else {
+							self.triggerUntriggeredEvents();
 							triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
 						}
 					}
@@ -3023,7 +3118,7 @@
 			* @returns {Object} {Long startRange, endRange}
 			*/
 			thisNode.range = function(){
-				return {start: startRange, end: endRange};
+				return dataRange;
 			};
 
 			/**
@@ -3130,10 +3225,10 @@
 			}
 
 			function splitNode(noTrigger){
-				var splitedRange = splitRange(startRange, endRange);
+				var splitedRange = dataRange.split();
 				var leftRange = splitedRange[0], rightRange = splitedRange[1];
-				var leftNode = new TreeNode(leftRange.s, leftRange.e, null, thisNode);
-				var rightNode = new TreeNode(rightRange.s, rightRange.e, null, thisNode);
+				var leftNode = new TreeNode(leftRange, null, thisNode);
+				var rightNode = new TreeNode(rightRange, null, thisNode);
 
 				thisNode.setLeft(leftNode);
 				thisNode.setRight(rightNode);
@@ -3143,9 +3238,9 @@
 				var leftSubCollection = {}, rightSubCollection = {};
 				for (var i = 0; i < subCollectionList.length; i++){
 					var currentHash = hashToLong(subCollectionList[i]);
-					if (isHashContainedIn(leftRange.s, leftRange.e, currentHash)){
+					if (leftRange.contains(currentHash)){
 						leftSubCollection[subCollectionList[i]] = subCollection[subCollectionList[i]];
-					} else if (isHashContainedIn(rightRange.s, rightRange.e, currentHash)){
+					} else if (rightRange.contains(currentHash)){
 						rightSubCollection[subCollectionList[i]] = subCollection[subCollectionList[i]];
 					} else {
 						console.error('Error in hash distribution');
@@ -3157,9 +3252,9 @@
 				subCollection = null;
 				//Trigger events
 				if (!noTrigger){
-					triggerEv('delete', [getRangeString(thisNode.range())]);
-					triggerEv('change', [getRangeString(leftRange), leftSubCollection]);
-					triggerEv('change', [getRangeString(rightRange), rightSubCollection]);
+					triggerEv('delete', [dataRange.toString()]);
+					triggerEv('change', [leftRange.toString(), leftSubCollection]);
+					triggerEv('change', [rightRange.toString(), rightSubCollection]);
 				}
 			}
 
@@ -3196,44 +3291,79 @@
 			for (var i = 0; i < p.length; i++) p[i] = a[i];
 			return p;
 		}
+	}
 
-		function splitRange(s, e){
-			var middle = midRange(s, e);
-			return [{s: s, e: middle}, {s: middle.add(1), e: e}];
+	function PearsonRange(start, end){
+		if (typeof start == 'string'){
+			if (!(start.length == 16 && is_hex(start))) throw new TypeError('when start is a string, it must be a hex representation of a long (i.e, 8 bytes -> 16 hex chars)');
+			start = from_hex(start);
+		}
+		if (start instanceof Uint8Array){
+			start = bufferBEToLong(start);
+		}
+		if (!(start instanceof Long && start.unsigned)) throw new TypeError('start must be either a hex string, an 8 byte buffer, or an unsigned Long instance');
+
+		if (typeof end == 'string'){
+			if (!(end.length == 16 && is_hex(end))) throw new TypeError('when end is a string, it must be a hex representation of a long (i.e, 8 bytes -> 16 hex chars)');
+			end = from_hex(end);
+		}
+		if (end instanceof Uint8Array){
+			end = bufferBEToLong(end);
+		}
+		if (!(end instanceof Long && end.unsigned)) throw new TypeError('end must be either a hex string, an 8 byte buffer, or an unsigned Long instance');
+
+		//if (!(start instanceof Long && start.unsigned)) throw new TypeError('start must be an unsigned Long instance');
+		//if (!(end instanceof Long && end.unsigned)) throw new TypeError('end must be an unsigned Long instance');
+
+		Object.setProperty(this, 'start', {
+			value: start,
+			enumerable: true
+		});
+		Object.setProperty(this, 'end', {
+			value: end,
+			enumerable: true
+		});
+		Object.setProperty(this, 'width', {
+			value: rangeWidth(start, end),
+			enumerable: true
+		});
+
+		/*this.start = start;
+		this.end = end;
+		this.width = rangeWidth(this.start, this.end);*/
+
+		this.prototype.midRange = function(){
+			return midRange(this.start, this.end);
 		}
 
-		function midRange(s, e){
-			var rangeWidth = e.subtract(s);
-			var middle = s.add(rangeWidth.divide(2));
-			return middle;
-		}
+		this.prototype.toString = function(){
+			return getRangeString(this);
+		};
 
-		function rangeWidth(s, e){
-			return e.subtract(s).add(1); //end - start + 1
-		}
+		this.prototype.split = function(){
+			var parts = splitRange(this.start, this.end);
+			return [new PearsonRange(parts[0].s, parts[0].e), new PearsonRange(parts[1].s, parts[1].e)];
+		};
 
-		function isRangeContainedIn(containerStart, containerEnd, start, end){
-			return containerStart.gte(start) && containerEnd.lte(end);
-		}
+		this.prototype.contains = function(h){
+			if (!(h instanceof Long && h.unsigned)) throw new TypeError('h must be an unsigned Long instance');
+			return isHashContainedIn(this.start, this.end, h);
+		};
 
-		function isHashContainedIn(containerStart, containerEnd, h){
-			return containerStart.gte(h) && containerEnd.lte(h);
-		}
+		this.prototype.containsRange = function(r){
+			if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
+			return isHashContainedIn(this.start, this.end, r.start, r.end);
+		};
 
-		function incrRangeElement(a){
-			if (!(a instanceof Uint8Array)) throw new TypeError('A must be a Uint8Array');
-			a = copyBuffer(a);
-			for (var i = a.length - 1; i >= 0; i--){
-				if (a[i] == 255){ //A carry will ensue from the incrementation
-					a[i]++;
-				} else {
-					a[i]++;
-					break;
-				}
-			}
+		this.prototype.isContainedIn = function(r){
+			if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
+			return isHashContainedIn(r.start, r.end, this.start, this.end);
+		};
 
-			return a;
-		}
+		this.prototype.equals = function(r){
+			if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
+			return this.start.equals(r.start) && this.end.equals(r.end);
+		};
 	}
 
 	function bufferBEToLong(b){
@@ -3256,6 +3386,29 @@
 			b[i+4] = l.low >> 8 * (4 - i);
 		}
 		return b;
+	}
+
+	function splitRange(s, e){
+		var middle = midRange(s, e);
+		return [{s: s, e: middle}, {s: middle.add(1), e: e}];
+	}
+
+	function midRange(s, e){
+		var rangeWidth = e.subtract(s);
+		var middle = s.add(rangeWidth.divide(2));
+		return middle;
+	}
+
+	function rangeWidth(s, e){
+		return e.subtract(s).add(1); //end - start + 1
+	}
+
+	function isRangeContainedIn(containerStart, containerEnd, start, end){
+		return containerStart.gte(start) && containerEnd.lte(end);
+	}
+
+	function isHashContainedIn(containerStart, containerEnd, h){
+		return containerStart.gte(h) && containerEnd.lte(h);
 	}
 
 	function longToHex(l){
