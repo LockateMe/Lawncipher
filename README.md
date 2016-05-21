@@ -89,21 +89,69 @@ window.plugins.nodefs.init(function(err){
 
 ## Example queries (and their SQL counterpart)
 
-__`Collection.find('abc')`__ : Looking up the document having 'abc' as ID.
+__Lawncipher__
+Retrieving a document by its ID (here, 'abc')
 
-__`Collection.find({firstName: 'Steve', lastName: 'Jobs'}, callback)`__
+```js
+Collection.find('abc', callbackFunction)
+```
+
+-----------------
+
+__Lawncipher__
+```js
+Collection.find({firstName: 'Steve', lastName: 'Jobs'}, callback)
+```
+__SQL__
+```sql
 SELECT * FROM tableName WHERE firstName = 'Steve' AND lastName = 'Jobs'
+```
 
-__`Collection.find({firstName: 'Steve', $not: {lastName: 'Jobs'}}, callback)`__ SELECT * FROM tableName WHERE firstName = 'Steve' AND lastName <> 'Jobs'
+-----------------
 
-__`Collection.find({$or: [{firstName: ’Steve}, {lastName: ‘Jobs'}]}, callback)`__
+__Lawncipher__
+```js
+Collection.find({firstName: 'Steve', $not: {lastName: 'Jobs'}}, callback)
+```
+__SQL__
+```sql
+SELECT * FROM tableName WHERE firstName = 'Steve' AND lastName <> 'Jobs'
+```
+
+-----------------
+
+__Lawncipher__
+```js
+Collection.find({$or: [{firstName: 'Steve'}, {lastName: 'Jobs'}]}, callback)
+```
+__SQL__
+```sql
 SELECT * FROM tableName WHERE firstName = 'Steve' OR lastName = 'Jobs'  
+```
 
-__`Collection.find({firstName: 'Steve', $or: [{lastName: 'Wozniak'}, {lastName: 'Jobs'}])`__
+-----------------
+
+__Lawncipher__
+```js
+Collection.find({firstName: 'Steve', $or: [{lastName: 'Wozniak'}, {lastName: 'Jobs'}])
+```
+__SQL__
+```sql
 SELECT * FROM tableName WHERE firstName = 'Steve' AND (lastName = 'Wozniak' OR lastName = 'Jobs')
+```
 
-__`Collection.find({firstName: 'Steve', $sort: {lastName: 'asc'}, $skip: 100}, callback, 100)`__
-SELECT * FROM tableName WHERE firstName = 'Steve' ORDER BY lastName ASC LIMIT 100 OFFSET 100 (get the 101-200 guys who are called Steve, ordered alphabetically by lastName)
+-----------------
+
+__Lawncipher__
+```js
+Collection.find({firstName: 'Steve', $sort: {lastName: 'asc'}, $skip: 100}, callback, 100)
+```
+
+__SQL__
+```sql
+SELECT * FROM tableName WHERE firstName = 'Steve' ORDER BY lastName ASC LIMIT 100 OFFSET 100
+```
+(get the 101-200 guys who are called Steve, ordered alphabetically by lastName)
 
 ## Testing
 
