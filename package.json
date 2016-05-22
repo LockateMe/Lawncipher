@@ -30,7 +30,6 @@
     "grunt-jsvalidate": "^0.2.2"
   },
   "dependencies": {
-    "bson": "^0.4.23",
     "libsodium-wrappers": "^0.2.12",
     "long": "^3.1.0",
     "mkdirp": "^0.5.1",

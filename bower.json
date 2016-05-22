@@ -34,7 +34,6 @@
   ],
   "dependencies": {
     "libsodium.js": "~0.2.12",
-    "long": "~3.1.0",
-    "bson": "*"
+    "long": "~3.1.0"
   }
 }

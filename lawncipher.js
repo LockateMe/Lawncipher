@@ -8,18 +8,18 @@
 	}
 
 	if (typeof define === 'function' && define.amd){
-		define(['exports', 'sodium', 'console', _nodeContext.toString(), 'require', 'window', 'Long', 'bson'], factory);
+		define(['exports', 'sodium', 'console', _nodeContext.toString(), 'require', 'window', 'Long'], factory);
 	} else if (typeof exports !== 'undefined'){
-		factory(exports, require('libsodium-wrappers'), console, _nodeContext, require, !_nodeContext ? window : undefined, require('long'), require('bson'));
+		factory(exports, require('libsodium-wrappers'), console, _nodeContext, require, !_nodeContext ? window : undefined, require('long'));
 	} else {
 		var cb = root.Lawncipher && root.Lawncipher.onload;
-		factory((root.Lawncipher = {}), sodium, console, _nodeContext, typeof require != 'undefined' && require, !_nodeContext ? window : undefined, Long, bson);
+		factory((root.Lawncipher = {}), sodium, console, _nodeContext, typeof require != 'undefined' && require, !_nodeContext ? window : undefined, Long);
 		if (typeof cb == 'function'){
 			cb(root.Lawncipher);
 		}
 	}
 
-}(this, function(exports, sodium, console, nodeContext, require, window, Long, BSON){
+}(this, function(exports, sodium, console, nodeContext, require, window, Long){
 
 	var fs; //FileSystem reference. Depends on context
 	var pathJoin, rmdirr, mkdirp, fsExists; //Reference to "special case" fs methods, whose implementations are not always present/part of the fs library that we have. Populated in the if(nodeContext) below
@@ -151,14 +151,14 @@
 	*/
 	var maxIndexChunkSize = 51200; //(50 * 1024) bytes
 
-	function indexNameRegexBuilder(indexName){
+	function indexNameRegexBuilder(indexName, rangeOptional){
 		var regexStr = '^_';
 		if (!indexName || indexName == 'index'){
 			regexStr += 'index';
 		} else {
 			regexStr += '_' + indexName;
 		}
-		regexStr += '(:?_(?:[a-f]|[0-9]){16}_(?:[a-f]|[0-9]){16})?$';
+		regexStr += '(?:_((?:[a-f]|[0-9]){16})_((?:[a-f]|[0-9]){16}))' + (rangeOptional ? '?' : '') + '$';
 
 		return new RegExp(regexStr, 'gi');
 	}
@@ -200,20 +200,20 @@
 
 	var indexNamesRegex = indexNameRegexBuilder(); //Default/main index files regex
 
-	function indexNameBuilder(indexName, rangeStart, rangeEnd){
+	function indexNameBuilder(indexName){
 		if (indexName && typeof indexName != 'string') throw new TypeError('when defined, indexName must be a string');
-		if (!(rangeStart instanceof Long)) throw new TypeError('rangeStart must be a Long');
-		if (!(rangeEnd instanceof Long)) throw new TypeError('rangeEnd must be a Long');
 
-		var nameStr = '_';
-		if (!indexName || indexName == 'index'){
-			nameStr += 'index';
-		} else {
-			nameStr += '_' + indexName;
+		return function(dataRange){
+			var nameStr = '_';
+			if (!indexName || indexName == 'index'){
+				nameStr += 'index';
+			} else {
+				nameStr += '_' + indexName;
+			}
+			nameStr += '_' + dataRange.toString();
+
+			return nameStr;
 		}
-		nameStr += '_' + longToHex(rangeStart) + '_' + longToHex(rangeEnd);
-
-		return nameStr;
 	}
 
 	/*
@@ -2525,13 +2525,14 @@
 		return bCopy;
 	}
 
-	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, collectionIndexRef, loadCallback){
+	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, collectionIndexRef, loadCallback, _maxLoadedDataSize){
 		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('collectionName must be a non-empty string');
 		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('indexName must be a non-empty string');
 		if (!(collectionKey instanceof Uint8Array && collectionKey.length == 32)) throw new TypeError('collectionKey must be a 32-byte Uint8Array');
 		if (!(Array.isArray(pearsonSeed) && pearsonSeed.length == 256)) throw new TypeError('pearsonSeed must be an array containing a permutation of integers in the range [0; 255]');
 		if (!(collectionIndexRef && typeof collectionIndexRef == 'object')) throw new TypeError('collectionIndexRef must be an object');
 		if (typeof loadCallback != 'function') throw new TypeError('loadCallback must be a function');
+		if (_maxLoadedDataSize && !(typeof _maxLoadedDataSize == 'number' && Math.floor(_maxLoadedDataSize) == _maxLoadedDataSize) && _maxLoadedDataSize > 0) throw new TypeError('when defined, _maxLoadedDataSize must be a strictly positive integer');
 
 		var self = this;
 
@@ -2541,9 +2542,24 @@
 		//Else, this index is an attribute search index. Hence, nodes have to allow multiple values for a given key
 		var attributeIndex = !(indexName == 'index');
 
-		var fragmentNameMatcher = indexNameRegexBuilder(indexName);
-		var fragmentNameBuilder = indexNameBuilder(indexName);
-		var fragmentsList = [];
+		var fragmentNameMatcher = indexNameRegexBuilder(indexName); //Fragment filename validation function
+		var fragmentNameBuilder = indexNameBuilder(indexName); //Fragment filename builder
+		var fragmentsList = []; //Array<PearsonRange>
+		var fragmentsSize = {}; //{rangeStr, fragmentPlaintextSize}
+		var currentDataLoad = 0; //Sum of fragmentPlaintextSizes
+		var currentLoadedFragments = []; //Array<PearsonRange>
+		var maxDataLoad = _maxLoadedDataSize || 52428800; // 50MB = 50 * 1024 * 1024 = 52428800 ?? What value should we assign to this??
+
+		var theHasher = PearsonHasher(pearsonSeed);
+		var theTree = new PearsonBPlusTree(53248, theHasher);
+
+		theTree.on('change', function(dRange, d){
+			saveIndexFragment(dRange, d);
+		});
+
+		theTree.on('delete', function(dRange){
+			deleteIndexFragment(dRange)
+		});
 
 		fs.readdir(collectionPath, function(err, collectionDirList){
 			if (err){
@@ -2553,7 +2569,11 @@
 
 			for (var i = 0; i < collectionDirList.length; i++){
 				if (fragmentNameMatcher.test(collectionDirList[i])){
-
+					//fragmentsList.push(collectionDirList[i]);
+					var parsingState;
+					while ((parsingState = fragmentNameMatcher.exec(collectionDirList[i])) !== null){
+						fragmentsList.push(new PearsonRange(hexToLong(parsingState[0]), hexToLong(parsingState[1])));
+					}
 				}
 			}
 		});
@@ -2562,7 +2582,24 @@
 			if (!(typeof key == 'string' || typeof key == 'number')) throw new TypeError('key must be a string or a number');
 			if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
+			var keyHash = theHasher(key);
 
+			var inTreeValue = theTree.lookup(key, keyHash);
+			if (!inTreeValue && !isRangeOfHashLoaded(keyHash)){
+				loadIndexFragmentForHash(keyHash, function(err){
+					if (err){
+						cb(err);
+						return;
+					}
+
+					inTreeValue = theTree.lookup(key, keyHash);
+					cb(undefined, inTreeValue);
+				});
+			} else cb(undefined, inTreeValue);
+
+			for (var i = 0; i < fragmentsList.length; i++){
+
+			}
 		};
 
 		self.add = function(key, value){
@@ -2572,6 +2609,79 @@
 		self.remove = function(key, value){
 
 		};
+
+		function loadIndexFragmentForHash(h, _cb){
+			var rangeOfHash = findRangeOfHash(h);
+			loadIndexFragment(rangeOfHash, _cb);
+		}
+
+		function loadIndexFragment(fRange, _cb){
+			var fileName = pathJoin(collectionPath, fragmentNameBuilder(fRange));
+			fs.readFile(fileName, function(err, fileData){
+				if (err){
+					if (_cb) _cb(err);
+					else throw err;
+					return;
+				}
+
+				var fragmentPlainText = scryptFileDecode(fileData, collectionKey);
+				var fragmentJSON = deserializeObject(JSON.parse(to_string(fragmentPlainText)));
+
+				theTree.insertRange(fRange, fragmentJSON);
+
+
+
+				if (_cb) _cb();
+			});
+		}
+
+		function unloadIndexFragment(fRange, _cb){
+
+			//Trim the data range from the search tree
+			theTree.trimRange(fRange);
+		}
+
+		function saveIndexFragment(fRange, fData, _cb){
+			var fileName = pathJoin(collectionPath, fragmentNameBuilder(fRange));
+
+			var fragmentPlainText = from_string(JSON.stringify(serializeObject(fData)));
+			var fragmentCipherText = scryptFileEncode(fragmentPlainText, collectionKey);
+			fs.writeFile(fileName, fragmentCipherText, function(err){
+				if (err){
+					if (_cb) _cb(err);
+					else throw err;
+					return;
+				}
+
+				if (_cb) _cb();
+			});
+		}
+
+		function deleteIndexFragment(fRange, _cb){
+			var fragmentPath = pathJoin(collectionPath, fragmentNameBuilder(fRange))
+			fs.unlink(fragmentPath, function(err){
+				if (err){
+					if (_cb) _cb(err);
+					else console.error('Cannot remove index fragment ' + fragmentPath + ': ' + err);
+					return;
+				}
+
+				if (_cb) _cb();
+			});
+		}
+
+		function findRangeOfHash(h){
+			for (var i = 0; i < fragmentsList.length; i++){
+				if (fragmentsList[i].contains(h)) return fragmentsList[i];
+			}
+		}
+
+		function isRangeOfHashLoaded(h){
+			for (var i = 0; i < currentLoadedFragments.length; i++){
+				if (currentLoadedFragments[i].contains(h)) return true;
+			}
+			return false;
+		}
 	}
 
 	function PearsonSeedGenerator(){
@@ -2757,7 +2867,9 @@
 		};
 
 		/**
-		* Insert tree data for a given range
+		* Insert tree data for a given range.
+		* The inserted data is considered as "already saved data", and hence we do not trigger the "change" event at the end of this
+		* It's just an "insertion in memory"
 		* @param {String|Long|Uint8Array} startRange - the beginning of the data range to insert
 		* @param {String|Long|Uint8Array} endRange - the end of the data range to insert
 		* @param {Object} subCollection - the documents/tree data to insert
@@ -2828,6 +2940,11 @@
 			} while (!isHolderOfRange);
 		};
 
+		/**
+		* Remove data for a given range from the tree
+		* It's just an "in memory removal", and hence the "delete" event is not triggered
+		* @param {PearsonRange} tRange - the range of data to trim. It has to be a range "cut by dichotomy"
+		*/
 		self.trimRange = function(tRange){
 			if (!(tRange instanceof PearsonRange)) throw new TypeError('tRange must be a PearsonRange instance');
 
@@ -2852,14 +2969,32 @@
 						}
 					}
 				} else {
-					var nextRanges = currentNodeRange.split();
-					if (nextRanges[0].contains(tRange)){
-						currentNode = currentNode.getLeft();
-					} else if (nextRanges[1].contains(tRange)){
-						currentNode = currentNode.getRight();
+					if (currentNode.isLeaf()){
+						//No node below this one
+						isHolderOfRange = true;
+						//Calculate hashes of the keys contained in this node, and remove those that fit tRange
+						var keyList = Object.keys(currentNode._subCollection);
+						if (keyList.length == 0) return; //Nothing to test or remove
+						for (var i = 0; i < keyList.length; i++){
+							var currentKeyHash = hashToLong(keyList[i]);
+							if (tRange.contains(currentKeyHash)){
+								delete currentNode._subCollection[keyList[i]];
+							}
+						}
 					} else {
-						console.error('You got lost');
-						return;
+						var nextRanges = currentNodeRange.split();
+						if (nextRanges[0].contains(tRange)){
+							currentNode = currentNode.getLeft();
+						} else if (nextRanges[1].contains(tRange)){
+							currentNode = currentNode.getRight();
+						} else {
+							console.error('You got lost');
+							return;
+						}
+
+						if (!currentNode){ //The node that's supposed to hold the range that we want to trim doesn't exist. Stop
+							return;
+						}
 					}
 				}
 			} while (!isHolderOfRange);
@@ -3076,7 +3211,7 @@
 						//No "value" -> key is docId -> docId is unique
 						delete subCollection[key];
 					}
-					if (currentCollectionSize < maxBinWidth / 2){
+					if (currentCollectionSize < maxBinWidth / 2 && !(dataRange.equals(rootNode.range()))){
 						//Do not trigger events from this method in this case. They will be triggered by the mergeWithSibling call
 						mergeWithSibling(noTrigger);
 					} else {
@@ -3225,6 +3360,7 @@
 			}
 
 			function splitNode(noTrigger){
+				if (dataRange.width == 1) return;
 				var splitedRange = dataRange.split();
 				var leftRange = splitedRange[0], rightRange = splitedRange[1];
 				var leftNode = new TreeNode(leftRange, null, thisNode);
@@ -3331,40 +3467,66 @@
 		/*this.start = start;
 		this.end = end;
 		this.width = rangeWidth(this.start, this.end);*/
+	}
 
-		this.prototype.midRange = function(){
-			return midRange(this.start, this.end);
+	PearsonRange.prototype.midRange = function(){
+		return midRange(this.start, this.end);
+	}
+
+	PearsonRange.prototype.toString = function(){
+		return getRangeString(this);
+	};
+
+	PearsonRange.prototype.split = function(){
+		var parts = splitRange(this.start, this.end);
+		return [new PearsonRange(parts[0].s, parts[0].e), new PearsonRange(parts[1].s, parts[1].e)];
+	};
+
+	PearsonRange.prototype.contains = function(h){
+		if (!(h instanceof Long && h.unsigned)) throw new TypeError('h must be an unsigned Long instance');
+		return isHashContainedIn(this.start, this.end, h);
+	};
+
+	PearsonRange.prototype.containsRange = function(r){
+		if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
+		return isHashContainedIn(this.start, this.end, r.start, r.end);
+	};
+
+	PearsonRange.prototype.isContainedIn = function(r){
+		if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
+		return isHashContainedIn(r.start, r.end, this.start, this.end);
+	};
+
+	PearsonRange.prototype.equals = function(r){
+		if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
+		return this.start.equals(r.start) && this.end.equals(r.end);
+	};
+
+	function LRUStringSet(){
+		this._d = [];
+	}
+
+	LRUStringSet.prototype.put = function(elem){
+		if (!(typeof elem == 'string' && elem.length > 0)) return -1;
+
+		var foundAt = -1;
+		for (var i = 0; i < this._d.length; i++){
+			if (this._d[i] == elem){
+				foundAt = i;
+				break;
+			}
 		}
 
-		this.prototype.toString = function(){
-			return getRangeString(this);
-		};
+		//Remove the element from its current position, to be put back to the front
+		if (foundAt != -1) this._d.splice(foundAt, 1);
 
-		this.prototype.split = function(){
-			var parts = splitRange(this.start, this.end);
-			return [new PearsonRange(parts[0].s, parts[0].e), new PearsonRange(parts[1].s, parts[1].e)];
-		};
+		return this._d.unshift(elem);
+	};
 
-		this.prototype.contains = function(h){
-			if (!(h instanceof Long && h.unsigned)) throw new TypeError('h must be an unsigned Long instance');
-			return isHashContainedIn(this.start, this.end, h);
-		};
-
-		this.prototype.containsRange = function(r){
-			if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
-			return isHashContainedIn(this.start, this.end, r.start, r.end);
-		};
-
-		this.prototype.isContainedIn = function(r){
-			if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
-			return isHashContainedIn(r.start, r.end, this.start, this.end);
-		};
-
-		this.prototype.equals = function(r){
-			if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
-			return this.start.equals(r.start) && this.end.equals(r.end);
-		};
-	}
+	LRUStringSet.prototype.lru = function(){
+		if (this._d.length == 0) return;
+		return this._d.pop();
+	};
 
 	function bufferBEToLong(b){
 		var l, h = 0;
