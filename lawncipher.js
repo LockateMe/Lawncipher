@@ -2566,13 +2566,15 @@
 		var currentLoadedFragmentsSize = {};
 
 		/*
-			Array<PearsonRange>. Contains a subset of fragmentsList.
-			To be used for operations on ranges. To check whether a
-			given range r is loaded, checking the existence of
-			currentLoadedFragmentsSize[r.toString()] might be faster
-			and scale better
+			Hash<PearsonRangeStr, PearsonRange>. Contains a subset of
+			fragmentsList. To be used for operations on ranges. To
+			check whether a given range r is loaded, checking the
+			existence of currentLoadedFragmentsSize[r.toString()]
+			might be faster and scale better (since
+			currentLoadedFragmentsSize contains n whereas
+			currentLoadedFragmentsRange contains objects)
 		*/
-		var currentLoadedFragmentsRange = [];
+		var currentLoadedFragmentsRange = {};
 
 		/*
 			The rough (inaccurate) memory usage threshold for the index,
@@ -2789,18 +2791,11 @@
 		}
 
 		function isRangeOfHashLoaded(h){
-			for (var i = 0; i < currentLoadedFragmentsRange.length; i++){
-				if (currentLoadedFragmentsRange[i].contains(h)) return true;
+			var currentLoadedFragmentsList = Object.keys(currentLoadedFragmentsRange);
+			for (var i = 0; i < currentLoadedFragmentsList.length; i++){
+				if (currentLoadedFragmentsRange[currentLoadedFragmentsList[[i]].contains(h)) return true;
 			}
 			return false;
-		}
-
-		function isRangeLoaded(r){
-			//Invalid way. This method is supposed to check whether a given range is loaded in currentLoadedFragmentsRange
-
-			//To check whether a given range is loaded, we don't actually need to go through the currentLoadedFragmentsRange array
-			//It's enough to check whether currentLoadedFragmentsSize[r.toString()] exists
-			return !!currentLoadedFragmentsSize[r.toString()];
 		}
 
 		function markUsageOfHash(h){
@@ -2816,7 +2811,9 @@
 				currentDataLoad += dataSize;
 			}
 
-			if (!isRangeLoaded(r))
+			if (!currentLoadedFragmentsRange[r._rangeStr]){
+				currentLoadedFragmentsRange[r._rangeStr] = r;
+			}
 
 			fragmentsLRU.put(fRangeStr);
 		}
@@ -2829,6 +2826,7 @@
 			var freedSize = currentLoadedFragmentsSize[fRangeStr];
 			currentDataLoad -= currentLoadedFragmentsSize[fRangeStr];
 			delete currentLoadedFragmentsSize[fRangeStr];
+			delete currentLoadedFragmentsRange[fRangeStr];
 
 			return freedSize;
 		}
