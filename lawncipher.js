@@ -2793,7 +2793,7 @@
 		function isRangeOfHashLoaded(h){
 			var currentLoadedFragmentsList = Object.keys(currentLoadedFragmentsRange);
 			for (var i = 0; i < currentLoadedFragmentsList.length; i++){
-				if (currentLoadedFragmentsRange[currentLoadedFragmentsList[[i]].contains(h)) return true;
+				if (currentLoadedFragmentsRange[currentLoadedFragmentsList[i]].contains(h)) return true;
 			}
 			return false;
 		}
