@@ -507,6 +507,8 @@
 							return;
 						}
 
+						rootIndexFileBuffer = checkReadBuffer(rootIndexFileBuffer);
+
 						var rootIndexContents;
 						try {
 							rootIndexContents = cryptoFileEncoding.decode(rootIndexFileBuffer);
