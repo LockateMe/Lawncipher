@@ -4,7 +4,7 @@
   "description": "An embedded, encrypted, multi-purpose document store",
   "main": "lawncipher.js",
   "scripts": {
-    "test": "node test.js"
+    "test": "./test_all.sh"
   },
   "repository": {
     "type": "git",
