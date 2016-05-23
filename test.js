@@ -1027,7 +1027,7 @@
 			function next(err){
 				if (err && !_currentParams.throws){
 					console.error('Unexpected error');
-					console.error(err);
+					throw err;
 					return;
 				}
 				taskIndex++;
