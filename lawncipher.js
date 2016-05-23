@@ -2188,7 +2188,7 @@
 				for (var i = 0; i < props.length; i++) c[props[i]] = clone(o[props[i]])
 				return c;
 			}
-		} else if (typeO == 'number' || typeO == 'string' || typeO == 'boolean') return o;
+		} else return o;
 	}
 	exports.clone = clone;
 
@@ -2542,22 +2542,63 @@
 		//Else, this index is an attribute search index. Hence, nodes have to allow multiple values for a given key
 		var attributeIndex = !(indexName == 'index');
 
-		var fragmentNameMatcher = indexNameRegexBuilder(indexName); //Fragment filename validation function
-		var fragmentNameBuilder = indexNameBuilder(indexName); //Fragment filename builder
-		var fragmentsList = []; //Array<PearsonRange>
-		var fragmentsSize = {}; //{rangeStr, fragmentPlaintextSize}
-		var currentDataLoad = 0; //Sum of fragmentPlaintextSizes
-		var currentLoadedFragments = []; //Array<PearsonRange>
-		var maxDataLoad = _maxLoadedDataSize || 52428800; // 50MB = 50 * 1024 * 1024 = 52428800 ?? What value should we assign to this??
+		var fragmentNameMatcher = indexNameRegexBuilder(indexName); //Fragment filename validation RegExp instance
+		var fragmentNameBuilder = indexNameBuilder(indexName); //Fragment filename builder function. Takes the dataRange (a PearsonRange instance) of the fragment in question
+
+		//Array<PearsonRange>. To be updated on Index instanciation, fragment change and delete events
+		var fragmentsList = [];
+		/*
+		*	Load state variables
+		*/
+
+		//Sum of currentLoadedFragmentsSize
+		var currentDataLoad = 0;
+
+		/*
+			Hash<PearsonRangeStr, fragmentPlaintextSize>.
+			Contains the plaintext size (in bytes) of each index fragment,
+			by rangeStr. To be used to calculate and updated currentDataLoad.
+			Also to be used to check the "loaded" state of a given fragment,
+			if we assume that check the existence of a key in JS hash/object
+			is faster than O(n) (i.e, the complexity of going through of
+			currentLoadedFragmentsRange and checking each element)
+		*/
+		var currentLoadedFragmentsSize = {};
+
+		/*
+			Array<PearsonRange>. Contains a subset of fragmentsList.
+			To be used for operations on ranges. To check whether a
+			given range r is loaded, checking the existence of
+			currentLoadedFragmentsSize[r.toString()] might be faster
+			and scale better
+		*/
+		var currentLoadedFragmentsRange = [];
+
+		/*
+			The rough (inaccurate) memory usage threshold for the index,
+			before it starts dynamic data loading
+			// 50MB = 50 * 1024 * 1024 = 52428800 ?? What default value should we assign to this??
+		*/
+		var maxDataLoad = _maxLoadedDataSize || 52428800;
+
+		/*
+			A "least recently used" string set, to keep track of which
+			data range was least recently used and hence more appropriate
+			to be removed from memory
+		*/
+		var fragmentsLRU = new LRUStringSet();
 
 		var theHasher = PearsonHasher(pearsonSeed);
-		var theTree = new PearsonBPlusTree(53248, theHasher);
+		var theTree = new PearsonBPlusTree(53248, theHasher, collectionIndexRef);
 
 		theTree.on('change', function(dRange, d){
+			//Updated loaded ranges and ranges list
+			markUsageOf(dRange);
 			saveIndexFragment(dRange, d);
 		});
 
 		theTree.on('delete', function(dRange){
+			//Updated loaded ranges and ranges list
 			deleteIndexFragment(dRange)
 		});
 
@@ -2585,6 +2626,14 @@
 			var keyHash = theHasher(key);
 
 			var inTreeValue = theTree.lookup(key, keyHash);
+
+			/*
+				If inTreeValue is defined, then we have found what we are looking for
+
+				If it is not defined, then we have to check that the corresponding data
+				range is loaded in memory. In case it is not loaded in memory, load it
+				and lookup again.
+			*/
 			if (!inTreeValue && !isRangeOfHashLoaded(keyHash)){
 				loadIndexFragmentForHash(keyHash, function(err){
 					if (err){
@@ -2592,22 +2641,60 @@
 						return;
 					}
 
+					//Data range usage doesn't "need" to be marked in this case, because loadIndexFragmentForHash does it, through loadIndexFragment
 					inTreeValue = theTree.lookup(key, keyHash);
 					cb(undefined, inTreeValue);
 				});
-			} else cb(undefined, inTreeValue);
-
-			for (var i = 0; i < fragmentsList.length; i++){
-
+			} else {
+				markUsageOfHash(keyHash);
+				cb(undefined, inTreeValue);
 			}
 		};
 
-		self.add = function(key, value){
+		self.add = function(key, value, cb){
+			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
+			//We must check that the range that corresponds to the key is currently loaded
+			var keyHash = theHasher(key);
 
+			//Check that data range is loaded before performing the addition
+			if (!isRangeOfHashLoaded(keyHash)){
+				loadIndexFragmentForHash(keyHash, function(err){
+					if (err){
+						if (cb) cb(err);
+						else throw err;
+						return;
+					}
+
+					theTree.add(key, value);
+					if (cb) cb();
+				});
+			} else {
+				theTree.add(key, value);
+				if (cb) cb();
+			}
 		};
 
-		self.remove = function(key, value){
+		self.remove = function(key, value, cb){
+			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
+			//We must check that the range that corresponds to the key is currently loaded
+			var keyHash = theHasher(key);
 
+			//Check that the data range is loaded before performing the removal
+			if (!isRangeOfHashLoaded(keyHash)){
+				loadIndexFragmentForHash(keyHash, function(err){
+					if (err){
+						if (cb) cb(err);
+						else throw err;
+						return;
+					}
+
+					theTree.remove(key, value);
+					if (cb) cb();
+				});
+			} else {
+				theTree.remove(key, value);
+				if (cb) cb();
+			}
 		};
 
 		function loadIndexFragmentForHash(h, _cb){
@@ -2629,16 +2716,28 @@
 
 				theTree.insertRange(fRange, fragmentJSON);
 
+				markUsageOf(fRange, fragmentPlainText.length);
 
+				checkMemoryUsage();
 
 				if (_cb) _cb();
 			});
 		}
 
-		function unloadIndexFragment(fRange, _cb){
+		function unloadIndexFragment(_cb){
+			var fRangeStr = fragmentsLRU.lru();
+			if (fRangeStr){ //If the LRU set returns nothing, then there is nothing to be unloaded
+				if (_cb) _cb();
+				return;
+			}
 
-			//Trim the data range from the search tree
+			var fRange = PearsonRange.fromString(fRangeStr);
+
+			var freedSize = markUnloadOf(fRange);
+
 			theTree.trimRange(fRange);
+
+			if (_cb) _cb(undefined, freedSize);
 		}
 
 		function saveIndexFragment(fRange, fData, _cb){
@@ -2653,6 +2752,10 @@
 					return;
 				}
 
+				markUsageOf(fRange, fragmentPlainText.length);
+
+				checkMemoryUsage();
+
 				if (_cb) _cb();
 			});
 		}
@@ -2666,6 +2769,15 @@
 					return;
 				}
 
+				for (var i = 0; i < fragmentsList.length; i++){
+					if (fragmentsList[i].equals(fRange)){
+						fragmentsList.splice(i, 1);
+						break;
+					}
+				}
+
+				markUnloadOf(fRange);
+
 				if (_cb) _cb();
 			});
 		}
@@ -2677,10 +2789,56 @@
 		}
 
 		function isRangeOfHashLoaded(h){
-			for (var i = 0; i < currentLoadedFragments.length; i++){
-				if (currentLoadedFragments[i].contains(h)) return true;
+			for (var i = 0; i < currentLoadedFragmentsRange.length; i++){
+				if (currentLoadedFragmentsRange[i].contains(h)) return true;
 			}
 			return false;
+		}
+
+		function isRangeLoaded(r){
+			//Invalid way. This method is supposed to check whether a given range is loaded in currentLoadedFragmentsRange
+
+			//To check whether a given range is loaded, we don't actually need to go through the currentLoadedFragmentsRange array
+			//It's enough to check whether currentLoadedFragmentsSize[r.toString()] exists
+			return !!currentLoadedFragmentsSize[r.toString()];
+		}
+
+		function markUsageOfHash(h){
+			return markUsageOf(findRangeOfHash(h));
+		}
+
+		function markUsageOf(fRange, dataSize){
+			var fRangeStr = fRange.toString();
+
+			if (dataSize){ //Data size corresponding to fRange needs to be updated if dataSize is provided
+				if (currentLoadedFragmentsSize[fRangeStr]) currentDataLoad -= currentLoadedFragmentsSize[fRangeStr];
+				currentLoadedFragmentsSize[fRangeStr] = dataSize;
+				currentDataLoad += dataSize;
+			}
+
+			if (!isRangeLoaded(r))
+
+			fragmentsLRU.put(fRangeStr);
+		}
+
+		function markUnloadOf(fRange){
+			var fRangeStr = fRange.toString();
+			//Check that the range is flagged as "loaded" and has its size in currentLoadedFragmentsSize
+			if (!currentLoadedFragmentsSize[fRangeStr]) return;
+
+			var freedSize = currentLoadedFragmentsSize[fRangeStr];
+			currentDataLoad -= currentLoadedFragmentsSize[fRangeStr];
+			delete currentLoadedFragmentsSize[fRangeStr];
+
+			return freedSize;
+		}
+
+		function checkMemoryUsage(){
+			if (currentDataLoad <= maxDataLoad) return;
+
+			while (currentDataLoad > maxDataLoad){
+				unloadIndexFragment();
+			}
 		}
 	}
 
@@ -3143,7 +3301,7 @@
 							right.addWithHash(hash, key, value, noTrigger);
 						}
 					} else {
-						currentCollectionSize += newDataSize;
+						currentDataSize += newDataSize;
 						if (value){
 							if (subCollection[key]) subCollection[key].push(value);
 							else subCollection[key] = [value];
@@ -3197,7 +3355,7 @@
 					if (!subCollection[key]) return;
 
 					var dataSizeToRemove = jsonSize(value) || getDocSize(key);
-					currentCollectionSize -= dataSizeToRemove;
+					currentDataSize -= dataSizeToRemove;
 					if (value){
 						if (subCollection[key]){
 							for (var i = 0; i < subCollection[key].length; i++){
@@ -3211,7 +3369,7 @@
 						//No "value" -> key is docId -> docId is unique
 						delete subCollection[key];
 					}
-					if (currentCollectionSize < maxBinWidth / 2 && !(dataRange.equals(rootNode.range()))){
+					if (currentDataSize < maxBinWidth / 2 && !(dataRange.equals(rootNode.range()))){
 						//Do not trigger events from this method in this case. They will be triggered by the mergeWithSibling call
 						mergeWithSibling(noTrigger);
 					} else {
@@ -3429,7 +3587,7 @@
 		}
 	}
 
-	function PearsonRange(start, end){
+	function PearsonRange(start, end, _rangeStr){
 		if (typeof start == 'string'){
 			if (!(start.length == 16 && is_hex(start))) throw new TypeError('when start is a string, it must be a hex representation of a long (i.e, 8 bytes -> 16 hex chars)');
 			start = from_hex(start);
@@ -3448,8 +3606,7 @@
 		}
 		if (!(end instanceof Long && end.unsigned)) throw new TypeError('end must be either a hex string, an 8 byte buffer, or an unsigned Long instance');
 
-		//if (!(start instanceof Long && start.unsigned)) throw new TypeError('start must be an unsigned Long instance');
-		//if (!(end instanceof Long && end.unsigned)) throw new TypeError('end must be an unsigned Long instance');
+		if (_rangeStr && !(typeof _rangeStr == 'string' && _rangeStr.length > 0)) throw new TypeError('when defined, _rangeStr must be a non-empty string');
 
 		Object.setProperty(this, 'start', {
 			value: start,
@@ -3464,6 +3621,12 @@
 			enumerable: true
 		});
 
+		var rangeStr = _rangeStr || getRangeString(this);
+		Object.setProperty(this, '_rangeStr', {
+			value: rangeStr,
+			enumerable: false
+		});
+
 		/*this.start = start;
 		this.end = end;
 		this.width = rangeWidth(this.start, this.end);*/
@@ -3474,7 +3637,7 @@
 	}
 
 	PearsonRange.prototype.toString = function(){
-		return getRangeString(this);
+		return this._rangeStr;
 	};
 
 	PearsonRange.prototype.split = function(){
@@ -3489,17 +3652,22 @@
 
 	PearsonRange.prototype.containsRange = function(r){
 		if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
-		return isHashContainedIn(this.start, this.end, r.start, r.end);
+		return isRangeContainedIn(this.start, this.end, r.start, r.end);
 	};
 
 	PearsonRange.prototype.isContainedIn = function(r){
 		if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
-		return isHashContainedIn(r.start, r.end, this.start, this.end);
+		return isRangeContainedIn(r.start, r.end, this.start, this.end);
 	};
 
 	PearsonRange.prototype.equals = function(r){
 		if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
 		return this.start.equals(r.start) && this.end.equals(r.end);
+	};
+
+	PearsonRange.fromString = function(rangeStr){
+		var rangeParts = getRangePartsFromString(rangeStr);
+		return new PearsonRange(rangeParts.start, rangeParts.end, rangeStr);
 	};
 
 	function LRUStringSet(){
@@ -3585,7 +3753,7 @@
 		return longToHex(rangeObj.start || rangeObj.s) + '_' + longToHex(rangeObj.end || rangeObj.e);
 	}
 
-	function getRangeFromString(rangeStr){
+	function getRangePartsFromString(rangeStr){
 		var rangeParts = rangeStr.split('_');
 		return {start: hexToLong(rangeParts[0]), end: hexToLong(rangeParts[1])};
 	}
@@ -3621,4 +3789,9 @@
 
 		return oSize;
 	}
+
+	exports.Index = Index;
+	exports.PearsonBPlusTree = PearsonBPlusTree;
+	exports.PearsonRange = PearsonRange;
+	exports.LRUStringSet = LRUStringSet
 }));
