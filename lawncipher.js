@@ -3793,5 +3793,6 @@
 	exports.Index = Index;
 	exports.PearsonBPlusTree = PearsonBPlusTree;
 	exports.PearsonRange = PearsonRange;
+	exports.PearsonSeedGenerator = PearsonSeedGenerator;
 	exports.LRUStringSet = LRUStringSet
 }));

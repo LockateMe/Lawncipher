@@ -10,6 +10,8 @@ echo "-----------------------------------"
 echo ""
 echo "LRU String Set"
 node tests/lru.js
+echo "Pearson Seed Generator"
+node tests/pearsonseedgenerator.js
 
 echo ""
 echo "-----------------------------------"
