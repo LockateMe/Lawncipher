@@ -56,3 +56,16 @@ assert(part1_1.toString().toLowerCase() == '0000000000000000_3fffffffffffffff');
 assert(part1_2.toString().toLowerCase() == '4000000000000000_7fffffffffffffff');
 assert(part2_1.toString().toLowerCase() == '8000000000000000_bfffffffffffffff');
 assert(part2_2.toString().toLowerCase() == 'c000000000000000_ffffffffffffffff');
+
+//Testing range membership
+assert(part1.containsRange(part1_1));
+assert(part1.containsRange(part1_2));
+assert(part1.isContainedIn(maxRange));
+assert(!part1.containsRange(part2_1));
+assert(!part1.containsRange(part2_2));
+
+assert(part2.containsRange(part2_1));
+assert(part2.containsRange(part2_2));
+assert(part2.isContainedIn(maxRange));
+assert(!part2.containsRange(part1_1));
+assert(!part2.containsRange(part1_2));
