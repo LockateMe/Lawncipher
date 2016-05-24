@@ -14,6 +14,8 @@ echo "Pearson Seed Generator"
 node tests/pearsonseedgenerator.js
 echo "Pearson ranges"
 node tests/pearsonrange.js
+echo "Pearson-based B+ trees"
+node tests/pearsonbplustree.js
 
 echo ""
 echo "-----------------------------------"
