@@ -116,7 +116,9 @@ function basicTests(){
 	assert(!testTree.lookup('hello'));
 }
 
-function loadTests(){
+function loadTests(docCount){
+	docCount = docCount || 100;
+
 	var testSeed = PearsonSeedGenerator();
 
 	var ph = PearsonHasher(testSeed);
@@ -127,9 +129,11 @@ function loadTests(){
 	testTree.on('delete', logDelete);
 
 	var futureLookups = [];
+	var dataSet = [];
 
-	for (var i = 0; i < 100; i++){
+	for (var i = 0; i < docCount; i++){
 		var tuple = {k: faker.random.uuid(), v: newRandomUserDoc()};
+		dataSet.push(tuple);
 		if (i % 10 == 0){
 			futureLookups.push(tuple);
 		}
@@ -138,6 +142,10 @@ function loadTests(){
 
 	for (var i = 0; i < futureLookups.length; i++){
 		assert(deepObjectEquality(testTree.lookup(futureLookups[i].k), futureLookups[i].v));
+	}
+
+	for (var i = 0; i < dataSet.length; i++){
+		testTree.remove(dataSet[i].k);
 	}
 }
 
