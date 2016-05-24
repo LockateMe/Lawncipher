@@ -1,5 +1,7 @@
 #! /bin/sh
 
+set -e
+
 if [ -d "./test_db" ]; then
 	rm -r ./test_db
 fi
