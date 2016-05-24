@@ -2893,9 +2893,9 @@
 			var hash = new Uint8Array(hashLength);
 			var i = 0, j = 0;
 			for (var j = 0; j < hashLength; j++){
-				var hashByte = seed[(d[i] + j) % 256];
+				var hashByte = seed[(d[0] + j) % 256];
 				for (var i = 1; i < d.length; i++){
-					hashByte = s[(hashByte ^ d[i])];
+					hashByte = seed[(hashByte ^ d[i])];
 				}
 				hash[j] = hashByte;
 			}
@@ -3799,6 +3799,7 @@
 	exports.Index = Index;
 	exports.PearsonBPlusTree = PearsonBPlusTree;
 	exports.PearsonRange = PearsonRange;
+	exports.PearsonHasher = PearsonHasher;
 	exports.PearsonSeedGenerator = PearsonSeedGenerator;
 	exports.LRUStringSet = LRUStringSet
 
