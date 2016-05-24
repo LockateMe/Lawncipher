@@ -2507,13 +2507,13 @@
 	}
 
 	function checkSubCollection(subCollection, varName){
-		if (typeof subCollection != 'object') throw new TypeError(varName + ' must be an object');
+		/*if (typeof subCollection != 'object') throw new TypeError(varName + ' must be an object');
 		var docList = Object.keys(subCollection);
 		for (var i = 0; i < docList.length; i++){
 			if (!(checkDocIndexObj(subCollection[docList[i]]) || Array.isArray(subCollection[docList[i]]))){
 				console.error('Invalid subCollection element [' + docList[i] + ']: ' + JSON.stringify(subCollection[docList[i]]));
 			}
-		}
+		}*/
 	}
 
 	function checkDocIndexObj(o){
@@ -2912,11 +2912,11 @@
 	*/
 	function PearsonBPlusTree(maxBinWidth, hasher, collectionIndexRef, disallowKeyCollisions){
 		//Maximum size of a bin. Ideally this number should represent the size of the data to be held by a single index fragment file
-		if (!(typeof maxBinWidth == 'number' && Math.floor(maxBinWidth) == maxBinWidth && maxBinWidth > 0)) throw new TypeError('maxBinWidth must be a strictly positive integer');
+		if (maxBinWidth && !(typeof maxBinWidth == 'number' && Math.floor(maxBinWidth) == maxBinWidth && maxBinWidth > 0)) throw new TypeError('when defined, maxBinWidth must be a strictly positive integer');
 		//The function retruned from PearsonHasher()
 		if (typeof hasher != 'function') throw new TypeError('hasher must be a function');
 		//Reference to the collections index. Useful to estimate JSON/doc size
-		if (typeof collectionIndexRef != 'object') throw new TypeError('collectionIndexRef must be an object');
+		if (collectionIndexRef && typeof collectionIndexRef != 'object') throw new TypeError('when defined, collectionIndexRef must be an object');
 
 		maxBinWidth = maxBinWidth || 53248; // 13 * 4096 (hoping to match 4096 block sizes)
 
@@ -2929,7 +2929,7 @@
 		//'delete', parameters: range_string
 
 		var evHandlers = {};
-		var rootNode = new TreeNode(new Long(0x00000000, 0x00000000, true), new Long(0xFFFFFFFF, 0xFFFFFFFF, true));
+		var rootNode = new TreeNode(new PearsonRange(new Long(0x00000000, 0x00000000, true), new Long(0xFFFFFFFF, 0xFFFFFFFF, true)));
 
 		/**
 		* Attach an event handler
@@ -3013,12 +3013,12 @@
 			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
 			var valType = typeof value;
-			if (!(valType == 'string' && valType == 'numebr' && valType == 'object')) throw new TypeError('value must either be a string, a number, or a JSON object');
+			if (!(valType == 'string' || valType == 'number' || valType == 'object')) throw new TypeError('value must either be a string, a number, or a JSON object');
 
 			rootNode.add(key, value, noTrigger);
 		};
 
-		self.remove = function(key, value){
+		self.remove = function(key, value, noTrigger){
 			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
 			rootNode.remove(key, value, noTrigger);
@@ -3168,7 +3168,7 @@
 
 			if (!hash) hash = hashToLong(key);
 
-			rootNode.lookup(key, hash);
+			return rootNode.lookup(key, hash);
 		};
 
 		/*self.getDistribution = function(){
@@ -3182,7 +3182,7 @@
 		* @param {Object<Function>} [_handlers] - list of handler functions to call
 		*/
 		function triggerEv(evName, args, _handlers){
-			var hanlders = _handlers || evHandlers;
+			var handlers = _handlers || evHandlers;
 			if (!handlers[evName]) return;
 
 			var currentEvHandlers = handlers[evName];
@@ -3218,6 +3218,7 @@
 			var subCollection = _subCollection || {};
 			var currentDataSize = 0;
 
+			var docIds = Object.keys(subCollection);
 			if (docIds.length > 0){ //Data has been provided on initialization. It's total size must be estimated
 				for (var i = 0; i < docIds.length; i++){
 					currentDataSize += getDocSize(data[i]);
@@ -3303,8 +3304,13 @@
 					} else {
 						currentDataSize += newDataSize;
 						if (value){
-							if (subCollection[key]) subCollection[key].push(value);
-							else subCollection[key] = [value];
+							if (disallowKeyCollisions){
+								if (subCollection[key]) throw new RangeError('key "' + key + '" already taken');
+								subCollection[key] = value
+							} else {
+								if (subCollection[key]) subCollection[key].push(value);
+								else subCollection[key] = [value];
+							}
 						} else {
 							//No "value" -> key is docId -> docId is unique
 							if (subCollection[key]) throw new Error('Key already taken');
@@ -3354,9 +3360,9 @@
 				if (isLeaf()){
 					if (!subCollection[key]) return;
 
-					var dataSizeToRemove = jsonSize(value) || getDocSize(key);
+					var dataSizeToRemove = (value && jsonSize(value)) || jsonSize(subCollection[key]) || getDocSize(key);
 					currentDataSize -= dataSizeToRemove;
-					if (value){
+					if (value && !disallowKeyCollisions){
 						if (subCollection[key]){
 							for (var i = 0; i < subCollection[key].length; i++){
 								if (subCollection[key][i] == value){
@@ -3364,6 +3370,7 @@
 									break;
 								}
 							}
+							if (subCollection[key].length == 0) delete subCollection[key];
 						}
 					} else {
 						//No "value" -> key is docId -> docId is unique
@@ -3399,9 +3406,9 @@
 					return subCollection[key];
 				} else {
 					if (hash.lte(middlePoint)){
-						left.lookup(key, hash);
+						return left.lookup(key, hash);
 					} else {
-						right.lookup(key, hash);
+						return right.lookup(key, hash);
 					}
 				}
 			};
@@ -3551,16 +3558,16 @@
 					triggerEv('change', [rightRange.toString(), rightSubCollection]);
 				}
 			}
-
-			function hashToLong(d){
-				if (typeof d == 'string'){
-					d = from_string(d);
-				}
-				return bufferBEToLong(hasher(d));
-			}
 		}
 
 		self.TreeNode = TreeNode;
+
+		function hashToLong(d){
+			if (typeof d == 'string'){
+				d = from_string(d);
+			}
+			return bufferBEToLong(hasher(d));
+		}
 
 		function getDocSize(docRef){
 			return typeof docRef == 'object' ? jsonSize(docRef) : jsonSize(collectionIndexRef[docRef]);
@@ -3740,11 +3747,11 @@
 	}
 
 	function isRangeContainedIn(containerStart, containerEnd, start, end){
-		return containerStart.gte(start) && containerEnd.lte(end);
+		return containerStart.lte(start) && containerEnd.gte(end);
 	}
 
 	function isHashContainedIn(containerStart, containerEnd, h){
-		return containerStart.gte(h) && containerEnd.lte(h);
+		return containerStart.lte(h) && containerEnd.gte(h);
 	}
 
 	function longToHex(l){
