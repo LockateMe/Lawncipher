@@ -12,6 +12,8 @@ echo "LRU String Set"
 node tests/lru.js
 echo "Pearson Seed Generator"
 node tests/pearsonseedgenerator.js
+echo "Pearson ranges"
+node tests/pearsonrange.js
 
 echo ""
 echo "-----------------------------------"

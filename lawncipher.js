@@ -3608,28 +3608,24 @@
 
 		if (_rangeStr && !(typeof _rangeStr == 'string' && _rangeStr.length > 0)) throw new TypeError('when defined, _rangeStr must be a non-empty string');
 
-		Object.setProperty(this, 'start', {
+		Object.defineProperty(this, 'start', {
 			value: start,
 			enumerable: true
 		});
-		Object.setProperty(this, 'end', {
+		Object.defineProperty(this, 'end', {
 			value: end,
 			enumerable: true
 		});
-		Object.setProperty(this, 'width', {
+		Object.defineProperty(this, 'width', {
 			value: rangeWidth(start, end),
 			enumerable: true
 		});
 
 		var rangeStr = _rangeStr || getRangeString(this);
-		Object.setProperty(this, '_rangeStr', {
+		Object.defineProperty(this, '_rangeStr', {
 			value: rangeStr,
 			enumerable: false
 		});
-
-		/*this.start = start;
-		this.end = end;
-		this.width = rangeWidth(this.start, this.end);*/
 	}
 
 	PearsonRange.prototype.midRange = function(){
@@ -3697,23 +3693,25 @@
 	};
 
 	function bufferBEToLong(b){
-		var l, h = 0;
+		var l = 0, h = 0;
 		for (var i = 0; i < 4; i++){
-			h += b[i] << 8 * (4 - i);
+			h += b[i] * Math.pow(2, 8 * (3 - i));
 		}
 		for (var i = 0; i < 4; i++){
-			l += b[i+4] << 8 * (4 - i);
+			l += b[i+4] * Math.pow(2, 8 * (3 - i));
 		}
 		return new Long(l, h, true);
 	}
 
 	function longToBufferBE(l){
 		var b = new Uint8Array(8);
+		var highBits = l.getHighBitsUnsigned();
+		var lowBits = l.getLowBitsUnsigned();
 		for (var i = 0; i < 4; i++){
-			b[i] = l.high >> 8 * (4 - i);
+			b[i] = (highBits >> 8 * (3 - i)) % 256;
 		}
 		for (var i = 0; i < 4; i++){
-			b[i+4] = l.low >> 8 * (4 - i);
+			b[i+4] = (lowBits >> 8 * (3 - i)) % 256;
 		}
 		return b;
 	}
@@ -3725,12 +3723,20 @@
 
 	function midRange(s, e){
 		var rangeWidth = e.subtract(s);
-		var middle = s.add(rangeWidth.divide(2));
+		var middle = s.add(rangeWidth.shru(1));
 		return middle;
 	}
 
+	/*
+		rangeWidth is used to see whether a given range can be splitted.
+		If that check is done via if (r.width == 1) return;, then the
+		formule end-start+1 is unsuited for that check. Hence we are
+		simply using end-start, where width would then represent
+		the number of integers "that we must count" to go from the start
+		to the end (and not the number of the number of integers in that range)
+	*/
 	function rangeWidth(s, e){
-		return e.subtract(s).add(1); //end - start + 1
+		return e.subtract(s); //.add(1); //end - start + 1
 	}
 
 	function isRangeContainedIn(containerStart, containerEnd, start, end){
@@ -3795,4 +3801,7 @@
 	exports.PearsonRange = PearsonRange;
 	exports.PearsonSeedGenerator = PearsonSeedGenerator;
 	exports.LRUStringSet = LRUStringSet
+
+	exports.bufferBEToLong = bufferBEToLong;
+	exports.longToBufferBE = longToBufferBE;
 }));
