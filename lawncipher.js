@@ -3474,7 +3474,7 @@
 			*/
 			thisNode.getBinnedRange = function(){
 				if (isLeaf()){
-					var resultObject = {start: startRange, end: endRange, subCollection: shallowCopy(subCollection)};
+					var resultObject = {range: dataRange, subCollection: shallowCopy(subCollection)};
 					return resultObject;
 				}/* else {
 					throw 'Incomplete';
@@ -3519,8 +3519,8 @@
 				//trigger delete events for sub-ranges for this node and its sibling
 				if (!noTrigger){
 					triggerEv('delete', [getRangeString(thisNodeRange)]);
-					triggerEv('delete', [getRangeString(siblingBinnedRange)]);
-					triggerEv('change', [longToHex(parent.range()), mergedSubCollection]);
+					triggerEv('delete', [getRangeString(siblingBinnedRange.range)]);
+					triggerEv('change', [getRangeString(parent.range()), mergedSubCollection]);
 				}
 			}
 
