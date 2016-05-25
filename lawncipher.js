@@ -3381,7 +3381,7 @@
 						mergeWithSibling(noTrigger);
 					} else {
 						if (noTrigger){
-							untriggeredEvents.push({_delete: true, rangeStr: getRangeString(thisNode.range())});
+							untriggeredEvents.push({_change: true, rangeStr: getRangeString(thisNode.range()), subCollection: subCollection});
 						} else {
 							self.triggerUntriggeredEvents();
 							triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
@@ -3494,7 +3494,7 @@
 				var isLeftNode = parent.getLeft() == thisNode;
 				var isRightNode = !isLeftNode;
 
-				var sibling = isLeftNode ? parent.getLeft() : parent.getRight();
+				var sibling = isLeftNode ? parent.getRight() : parent.getLeft(); //sibling = child of same parent, at the opposite side
 				if (!sibling.isLeaf()) return; //Give up the merge if sibling node is not also a leaf
 
 				var thisNodeRange = thisNode.range();
@@ -3517,10 +3517,23 @@
 				parent.setSubCollection(mergedSubCollection);
 
 				//trigger delete events for sub-ranges for this node and its sibling
-				if (!noTrigger){
+				/*if (!noTrigger){
 					triggerEv('delete', [getRangeString(thisNodeRange)]);
 					triggerEv('delete', [getRangeString(siblingBinnedRange.range)]);
 					triggerEv('change', [getRangeString(parent.range()), mergedSubCollection]);
+				}*/
+
+				if (noTrigger){
+					untriggeredEvents.push(
+						{_delete: true, rangeStr: thisNodeRange.toString()},
+						{_delete: true, rangeStr: siblingBinnedRange.range.toString()},
+						{_change: true, rangeStr: parent.range().toString(), subCollection: mergedSubCollection}
+					);
+				} else {
+					self.triggerUntriggeredEvents();
+					triggerEv('delete', [thisNodeRange.toString()]);
+					triggerEv('delete', [siblingBinnedRange.range.toString()]);
+					triggerEv('change', [parent.range().toString(), mergedSubCollection]);
 				}
 			}
 
@@ -3552,7 +3565,20 @@
 				//Clear data from this node
 				subCollection = null;
 				//Trigger events
-				if (!noTrigger){
+				/*if (!noTrigger){
+					triggerEv('delete', [dataRange.toString()]);
+					triggerEv('change', [leftRange.toString(), leftSubCollection]);
+					triggerEv('change', [rightRange.toString(), rightSubCollection]);
+				}*/
+
+				if (noTrigger){
+					untriggeredEvents.push(
+						{_delete: true, rangeStr: dataRange.toString()},
+						{_change: true, rangeStr: leftRange.toString(), subCollection: leftSubCollection},
+						{_change: true, rangeStr: rightRange.toString(), subCollection: rightSubCollection}
+					);
+				} else {
+					self.triggerUntriggeredEvents();
 					triggerEv('delete', [dataRange.toString()]);
 					triggerEv('change', [leftRange.toString(), leftSubCollection]);
 					triggerEv('change', [rightRange.toString(), rightSubCollection]);
