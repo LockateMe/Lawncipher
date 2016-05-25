@@ -149,6 +149,43 @@ function loadTests(docCount){
 	}
 }
 
+function postponingEventsTests(docCount){
+	docCount = docCount || 100;
+
+	var testSeed = PearsonSeedGenerator();
+
+	var ph = PearsonHasher(testSeed);
+
+	var testTree = new PearsonBPlusTree(1000, ph, undefined, true);
+
+	testTree.on('change', logChangeWithoutData);
+	testTree.on('delete', logDelete);
+
+	var futureLookups = [];
+	var dataSet = [];
+
+	console.log('---START OF ADDITIONS---');
+	for (var i = 0; i < docCount; i++){
+		var tuple = {k: faker.random.uuid(), v: newRandomUserDoc()};
+		dataSet.push(tuple);
+		if (i % 10 == 0){
+			futureLookups.push(tuple);
+		}
+		testTree.add(tuple.k, tuple.v, i < docCount - 1 ? true : false); //noTrigger == false for last the tuple only
+	}
+	console.log('---END OF ADDITIONS---');
+
+	for (var i = 0; i < futureLookups.length; i++){
+		assert(deepObjectEquality(testTree.lookup(futureLookups[i].k), futureLookups[i].v));
+	}
+
+	console.log('---START OF REMOVALS---');
+	for (var i = 0; i < dataSet.length; i++){
+		testTree.remove(dataSet[i].k, undefined, i < dataSet.length - 1 ? true : false); //noTrigger == false for the last tuple only
+	}
+	console.log('---END OF REMOVALS---');
+}
+
 console.log('----------------------');
 console.log('Basic Tree testing');
 console.log('----------------------');
@@ -157,3 +194,7 @@ console.log('----------------------');
 console.log('Tree load testing');
 console.log('----------------------');
 loadTests();
+console.log('----------------------');
+console.log('Postponed events testing');
+console.log('----------------------');
+postponingEventsTests();
