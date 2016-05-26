@@ -275,6 +275,8 @@
 	exports.setScryptProvider = setScryptProvider;
 	exports.useCordovaPluginScrypt = useCordovaPluginScrypt;
 
+	exports.randomBuffer = randomBuffer;
+
 	exports.db = Lawncipher;
 
 	function Lawncipher(rootPath, _fs){
@@ -2527,12 +2529,11 @@
 		return bCopy;
 	}
 
-	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, collectionIndexRef, loadCallback, _maxLoadedDataSize){
+	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, loadCallback, _maxLoadedDataSize){
 		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('collectionName must be a non-empty string');
 		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('indexName must be a non-empty string');
 		if (!(collectionKey instanceof Uint8Array && collectionKey.length == 32)) throw new TypeError('collectionKey must be a 32-byte Uint8Array');
 		if (!(Array.isArray(pearsonSeed) && pearsonSeed.length == 256)) throw new TypeError('pearsonSeed must be an array containing a permutation of integers in the range [0; 255]');
-		if (!(collectionIndexRef && typeof collectionIndexRef == 'object')) throw new TypeError('collectionIndexRef must be an object');
 		if (typeof loadCallback != 'function') throw new TypeError('loadCallback must be a function');
 		if (_maxLoadedDataSize && !(typeof _maxLoadedDataSize == 'number' && Math.floor(_maxLoadedDataSize) == _maxLoadedDataSize) && _maxLoadedDataSize > 0) throw new TypeError('when defined, _maxLoadedDataSize must be a strictly positive integer');
 
@@ -2593,7 +2594,7 @@
 		var fragmentsLRU = new LRUStringSet();
 
 		var theHasher = PearsonHasher(pearsonSeed);
-		var theTree = new PearsonBPlusTree(53248, theHasher, collectionIndexRef);
+		var theTree = new PearsonBPlusTree(53248, theHasher, !attributeIndex); //Key collisions are disallowed on attribute/searchIndex
 
 		theTree.on('change', function(dRange, d){
 			//Updated loaded ranges and ranges list
@@ -2606,22 +2607,31 @@
 			deleteIndexFragment(dRange)
 		});
 
-		fs.readdir(collectionPath, function(err, collectionDirList){
-			if (err){
-				loadCallback(err);
-				return;
-			}
-
-			for (var i = 0; i < collectionDirList.length; i++){
-				if (fragmentNameMatcher.test(collectionDirList[i])){
-					//fragmentsList.push(collectionDirList[i]);
-					var parsingState;
-					while ((parsingState = fragmentNameMatcher.exec(collectionDirList[i])) !== null){
-						fragmentsList.push(new PearsonRange(hexToLong(parsingState[0]), hexToLong(parsingState[1])));
+		fs.exists(collectionPath, function(dirExists){
+			if (dirExists){
+				fs.readdir(collectionPath, function(err, collectionDirList){
+					if (err){
+						loadCallback(err);
+						return;
 					}
-				}
+
+					for (var i = 0; i < collectionDirList.length; i++){
+						if (fragmentNameMatcher.test(collectionDirList[i])){
+							//fragmentsList.push(collectionDirList[i]);
+							var parsingState;
+							while ((parsingState = fragmentNameMatcher.exec(collectionDirList[i])) !== null){
+								fragmentsList.push(new PearsonRange(hexToLong(parsingState[0]), hexToLong(parsingState[1])));
+							}
+						}
+					}
+					loadCallback();
+				});
+			} else {
+				fragmentsList.push(PearsonRange.MAX_RANGE);
 			}
 		});
+
+
 
 		self.lookup = function(key, cb){
 			if (!(typeof key == 'string' || typeof key == 'number')) throw new TypeError('key must be a string or a number');
@@ -2699,6 +2709,10 @@
 				theTree.remove(key, value);
 				if (cb) cb();
 			}
+		};
+
+		self.iterator = function(){
+			throw new Error('Not yet implemented');
 		};
 
 		function loadIndexFragmentForHash(h, _cb){
@@ -2833,6 +2847,35 @@
 			return freedSize;
 		}
 
+		function addRangeToFragmentsList(fRange){ //We want to preserve the order in the fragmentsList
+			var foundAt = -1;
+			var insertIndex = -1;
+			for (var i = 0; i < fragmentsList.length; i++){
+				if (fragmentsList[i].equals(fRange)){
+					foundAt = i;
+					break;
+				}
+				if (fragmentsList[i].isOnRightOf(fRange)){ //Fragment was not found, but we already went beyond where it should have been
+					insertIndex = Math.max(0, i - 1);
+					break;
+				}
+			}
+
+			if (foundAt != -1) return; //range already in fragments list
+
+			//Insert the range
+			fragmentsList.splice(insertIndex, 0, fRange);
+		}
+
+		function removeRangeFromFragmentsList(fRange){
+			for (var i = 0; i < fragmentsList.length; i++){
+				if (fragmentsList[i].equals(fRange)){
+					fragmentsList.splice(i, 1);
+					break;
+				}
+			}
+		}
+
 		function checkMemoryUsage(){
 			if (currentDataLoad <= maxDataLoad) return;
 
@@ -2910,13 +2953,11 @@
 	* -central collection index. Key : docId. Value : document
 	* -search tree for an attribute in the index model. Key : attributeValue. Value : matching docIDs
 	*/
-	function PearsonBPlusTree(maxBinWidth, hasher, collectionIndexRef, disallowKeyCollisions){
+	function PearsonBPlusTree(maxBinWidth, hasher, disallowKeyCollisions){
 		//Maximum size of a bin. Ideally this number should represent the size of the data to be held by a single index fragment file
 		if (maxBinWidth && !(typeof maxBinWidth == 'number' && Math.floor(maxBinWidth) == maxBinWidth && maxBinWidth > 0)) throw new TypeError('when defined, maxBinWidth must be a strictly positive integer');
 		//The function retruned from PearsonHasher()
 		if (typeof hasher != 'function') throw new TypeError('hasher must be a function');
-		//Reference to the collections index. Useful to estimate JSON/doc size
-		if (collectionIndexRef && typeof collectionIndexRef != 'object') throw new TypeError('when defined, collectionIndexRef must be an object');
 
 		maxBinWidth = maxBinWidth || 53248; // 13 * 4096 (hoping to match 4096 block sizes)
 
@@ -2929,7 +2970,7 @@
 		//'delete', parameters: range_string
 
 		var evHandlers = {};
-		var rootNode = new TreeNode(new PearsonRange(new Long(0x00000000, 0x00000000, true), new Long(0xFFFFFFFF, 0xFFFFFFFF, true)));
+		var rootNode = new TreeNode(PearsonRange.MAX_RANGE);
 
 		/**
 		* Attach an event handler
@@ -3292,7 +3333,7 @@
 				}
 
 				if (isLeaf()){
-					var newDataSize = jsonSize(value) || getDocSize(key);
+					var newDataSize = jsonSize(value);
 					var newNodeSize = currentDataSize + newDataSize;
 					if (newNodeSize >= maxBinWidth){
 						splitNode(noTrigger);
@@ -3303,18 +3344,13 @@
 						}
 					} else {
 						currentDataSize += newDataSize;
-						if (value){
-							if (disallowKeyCollisions){
-								if (subCollection[key]) throw new RangeError('key "' + key + '" already taken');
-								subCollection[key] = value
-							} else {
-								if (subCollection[key]) subCollection[key].push(value);
-								else subCollection[key] = [value];
-							}
+
+						if (disallowKeyCollisions){
+							if (subCollection[key]) throw new RangeError('key "' + key + '" already taken');
+							subCollection[key] = value
 						} else {
-							//No "value" -> key is docId -> docId is unique
-							if (subCollection[key]) throw new Error('Key already taken');
-							subCollection[key] = collectionIndexRef[key];
+							if (subCollection[key]) subCollection[key].push(value);
+							else subCollection[key] = [value];
 						}
 
 						if (noTrigger){
@@ -3360,7 +3396,7 @@
 				if (isLeaf()){
 					if (!subCollection[key]) return;
 
-					var dataSizeToRemove = (value && jsonSize(value)) || jsonSize(subCollection[key]) || getDocSize(key);
+					var dataSizeToRemove = (value && jsonSize(value)) || jsonSize(subCollection[key]);
 					currentDataSize -= dataSizeToRemove;
 					if (value && !disallowKeyCollisions){
 						if (subCollection[key]){
@@ -3595,10 +3631,6 @@
 			return bufferBEToLong(hasher(d));
 		}
 
-		function getDocSize(docRef){
-			return typeof docRef == 'object' ? jsonSize(docRef) : jsonSize(collectionIndexRef[docRef]);
-		}
-
 		function findCommonPrefix(a, b){
 			if (!(a instanceof Uint8Array && a.length > 0)) throw new TypeError('a must be a non-empty Uint8Array');
 			if (!(b instanceof Uint8Array && b.length > 0)) throw new TypeError('b must be a non-empty Uint8Array');
@@ -3694,10 +3726,44 @@
 		return this.start.equals(r.start) && this.end.equals(r.end);
 	};
 
+	PearsonRange.prototype.isRightNeighbor = function(rightNeighborRange){
+		if (!(rightNeighborRange instanceof PearsonRange)) throw new TypeError('rightNeighborRange must be a PearsonRange instance');
+		//If this range's end is at MAX, then this range cannot have a right-side neighbor
+		if (this.end.equals(PearsonRange.MAX_RANGE.end)) return false;
+		//Check that the neighbor's start == this end's + 1
+		return this.end.add(1).equals(rightNeighborRange.start);
+	};
+
+	PearsonRange.prototype.isLeftNeighbor = function(leftNeighborRange){
+		if (!(leftNeighborRange instanceof PearsonRange)) throw new TypeError('leftNeighborRange must be a PearsonRange instance');
+		//If this range's start is at MAX, then this range cannot have a left-side neighbor
+		if (this.start.equals(PearsonRange.MAX_RANGE.start)) return false;
+		//Check that the neighbor's end == this start's - 1
+		return this.start.sub(1).equals(leftNeighborRange.end);
+	};
+
+	PearsonRange.prototype.isOnLeftOf = function(rightRange){
+		if (!(rightRange instanceof PearsonRange)) throw new TypeError('rightRange must be a PearsonRange instance');
+
+		if (this.end.equals(PearsonRange.MAX_RANGE.end)) return false;
+
+		return this.end.lt(rightRange.start);
+	};
+
+	PearsonRange.prototype.isOnRightOf = function(leftRange){
+		if (!(leftRange instanceof PearsonRange)) throw new TypeError('leftRange must be a PearsonRange instance');
+
+		if (this.start.equals(PearsonRange.MAX_RANGE.start)) return false;
+
+		return this.start.gt(leftRange.end);
+	};
+
 	PearsonRange.fromString = function(rangeStr){
 		var rangeParts = getRangePartsFromString(rangeStr);
 		return new PearsonRange(rangeParts.start, rangeParts.end, rangeStr);
 	};
+
+	PearsonRange.MAX_RANGE = PearsonRange.fromString('0000000000000000_ffffffffffffffff');
 
 	function LRUStringSet(){
 		this._d = [];

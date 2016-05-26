@@ -66,7 +66,7 @@ function basicTests(){
 
 	console.log('Testing while disallowing key collisions');
 
-	var testTree = new PearsonBPlusTree(undefined, ph, undefined, true);
+	var testTree = new PearsonBPlusTree(undefined, ph, true);
 
 	testTree.on('change', logChange);
 	testTree.on('delete', logDelete);
@@ -93,7 +93,7 @@ function basicTests(){
 
 	console.log('Testing while allowing key collisions');
 
-	testTree = new PearsonBPlusTree(undefined, ph, undefined, false);
+	testTree = new PearsonBPlusTree(undefined, ph, false);
 
 	testTree.on('change', logChange);
 	testTree.on('delete', logDelete);
@@ -123,7 +123,7 @@ function loadTests(docCount){
 
 	var ph = PearsonHasher(testSeed);
 
-	var testTree = new PearsonBPlusTree(1000, ph, undefined, true);
+	var testTree = new PearsonBPlusTree(1000, ph, true);
 
 	testTree.on('change', logChangeWithoutData);
 	testTree.on('delete', logDelete);
@@ -156,7 +156,7 @@ function postponingEventsTests(docCount){
 
 	var ph = PearsonHasher(testSeed);
 
-	var testTree = new PearsonBPlusTree(1000, ph, undefined, true);
+	var testTree = new PearsonBPlusTree(1000, ph, true);
 
 	testTree.on('change', logChangeWithoutData);
 	testTree.on('delete', logDelete);
