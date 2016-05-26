@@ -20,6 +20,8 @@ echo "Pearson ranges"
 node tests/pearsonrange.js
 echo "Pearson-based B+ trees"
 node tests/pearsonbplustree.js
+echo "Splitted indexes"
+node tests/splitindex.js
 
 echo ""
 echo "-----------------------------------"

@@ -892,74 +892,6 @@
 				});
 			}
 
-			function serializeObject(o){ //Serializing date and buffer values to string, and preventing mix-up with strings
-				if (!(typeof o == 'object' && o != null)){
-					return o;
-				}
-				if (Array.isArray(o)){
-					var serializedArray = new Array(o.length);
-					for (var i = 0; i < o.length; i++){
-						serializedArray[i] = serializeObject(o[i]);
-					}
-					return serializedArray;
-				}
-				o = clone(o);
-				var objAttributes = Object.keys(o);
-				//Search for strings in blob. Prefix them with "$string"
-				//Search for dates in blob. Prefix them with "$date"
-				for (var i = 0; i < objAttributes.length; i++){
-					var currentValue = o[objAttributes[i]];
-					if (typeof currentValue == 'string'){
-						o[objAttributes[i]] = '$string:' + currentValue;
-						continue;
-					}
-					if (currentValue instanceof Date){
-						o[objAttributes[i]] = '$date:' + currentValue.getTime();
-						continue;
-					}
-					if (currentValue instanceof Uint8Array){
-						o[objAttributes[i]] = '$buffer:' + to_string(currentValue);
-						continue;
-					}
-				}
-				return o;
-			}
-
-			function deserializeObject(o){ //Deserializing date and buffer values
-				if (!(typeof o == 'object' && o != null)){
-					return o;
-				}
-				if (Array.isArray(o)){
-					var deserialzedArray = new Array(o.length);
-					for (var i = 0; i < o.length; i++){
-						deserialzedArray[i] = deserializeObject(o[i]);
-					}
-					return deserialzedArray;
-				}
-				o = clone(o);
-				var objAttributes = Object.keys(o);
-				for (var i = 0; i < objAttributes.length; i++){
-					var currentValue = o[objAttributes[i]];
-					if (typeof currentValue == 'string'){
-						if (currentValue.indexOf('$date:') == 0){
-							currentValue = currentValue.substring('$date:'.length);
-							currentValue = Number(currentValue);
-							if (isNaN(currentValue)){
-								cb('INVALID_DATE_FORMAT');
-								return;
-							}
-							currentValue = new Date(currentValue);
-						} else if (currentValue.indexOf('$string:') == 0){
-							currentValue = currentValue.substring('$string:'.length);
-						} else if (currentValue.indexOf('$buffer:') == 0){
-							currentValue = from_string(currentValue.substring('$buffer:'.length));
-						}
-						o[objAttributes[i]] = currentValue;
-					}
-				}
-				return o;
-			}
-
 			this.save = function(blob, index, cb, overwrite, ttl, doNotWriteIndex){
 				if (typeof cb != 'function') throw new TypeError('callback must be a function');
 				var fileData, indexData, docId, docIndexObj, serializedDocIndexObj;
@@ -2172,6 +2104,76 @@
 		return part1 + part2;
 	};
 
+	//Serializing date and buffer values to string, and preventing mix-up with strings
+	function serializeObject(o){
+		if (!(typeof o == 'object' && o != null)){
+			return o;
+		}
+		if (Array.isArray(o)){
+			var serializedArray = new Array(o.length);
+			for (var i = 0; i < o.length; i++){
+				serializedArray[i] = serializeObject(o[i]);
+			}
+			return serializedArray;
+		}
+		o = clone(o);
+		var objAttributes = Object.keys(o);
+		//Search for strings in blob. Prefix them with "$string"
+		//Search for dates in blob. Prefix them with "$date"
+		for (var i = 0; i < objAttributes.length; i++){
+			var currentValue = o[objAttributes[i]];
+			if (typeof currentValue == 'string'){
+				o[objAttributes[i]] = '$string:' + currentValue;
+				continue;
+			}
+			if (currentValue instanceof Date){
+				o[objAttributes[i]] = '$date:' + currentValue.getTime();
+				continue;
+			}
+			if (currentValue instanceof Uint8Array){
+				o[objAttributes[i]] = '$buffer:' + to_string(currentValue);
+				continue;
+			}
+		}
+		return o;
+	}
+
+	//Deserializing date and buffer values
+	function deserializeObject(o){
+		if (!(typeof o == 'object' && o != null)){
+			return o;
+		}
+		if (Array.isArray(o)){
+			var deserialzedArray = new Array(o.length);
+			for (var i = 0; i < o.length; i++){
+				deserialzedArray[i] = deserializeObject(o[i]);
+			}
+			return deserialzedArray;
+		}
+		o = clone(o);
+		var objAttributes = Object.keys(o);
+		for (var i = 0; i < objAttributes.length; i++){
+			var currentValue = o[objAttributes[i]];
+			if (typeof currentValue == 'string'){
+				if (currentValue.indexOf('$date:') == 0){
+					currentValue = currentValue.substring('$date:'.length);
+					currentValue = Number(currentValue);
+					if (isNaN(currentValue)){
+						cb('INVALID_DATE_FORMAT');
+						return;
+					}
+					currentValue = new Date(currentValue);
+				} else if (currentValue.indexOf('$string:') == 0){
+					currentValue = currentValue.substring('$string:'.length);
+				} else if (currentValue.indexOf('$buffer:') == 0){
+					currentValue = from_string(currentValue.substring('$buffer:'.length));
+				}
+				o[objAttributes[i]] = currentValue;
+			}
+		}
+		return o;
+	}
+
 	/*
 	* Deep clone of an object. WARNING: NOT CHECKING FOR CIRCULAR REFERENCES
 	*/
@@ -2282,7 +2284,7 @@
 	function scryptFileEncode(buffer, rootKey, salt, opsLimit, r, p, fileFormatVersion){
 		if (!(buffer && buffer instanceof Uint8Array)) throw new TypeError('Buffer must be a Uint8Array');
 		if (!(typeof rootKey == 'string' || rootKey instanceof Uint8Array)) throw new TypeError('rootKey must be a string or a Uint8Array buffer');
-		if (!(typeof salt == 'string' || salt instanceof Uint8Array)) throw new TypeError('salt must be a string or a Uint8Array buffer');
+		if (salt && !((typeof salt == 'string' || salt instanceof Uint8Array))) throw new TypeError('salt must be a string or a Uint8Array buffer');
 
 		if (rootKey.length != sodium.crypto_secretbox_KEYBYTES) throw new TypeError('rootKey must be 32 bytes long');
 
@@ -2299,7 +2301,7 @@
 
 		if (!(typeof fileFormatVersion == 'number' && Math.floor(fileFormatVersion) == fileFormatVersion && fileFormatVersion >= 0 && fileFormatVersion <= 255)) throw new TypeError('when provided, fileFormatVersion must be a byte');
 
-		var saltSize = salt.length;
+		var saltSize = (salt && salt.length) || 0;
 		var nonceSize = sodium.crypto_secretbox_NONCEBYTES;
 		var totalSize = 17 + saltSize + nonceSize + buffer.length + sodium.crypto_secretbox_MACBYTES;
 
@@ -2444,7 +2446,7 @@
 		if (in_avail() < minRemainingSize) throw new RangeError('Invalid encrypted buffer format');
 
 		//Reading salt
-		var salt = new Uint8Array(saltSize);
+		var salt = saltSize > 0 ? new Uint8Array(saltSize) : undefined;
 		for (var i = 0; i < saltSize; i++){
 			salt[i] = buffer[rIndex+i];
 		}
@@ -2596,14 +2598,22 @@
 		var theHasher = PearsonHasher(pearsonSeed);
 		var theTree = new PearsonBPlusTree(53248, theHasher, !attributeIndex); //Key collisions are disallowed on attribute/searchIndex
 
+		var hashToLong = function(s){
+			return bufferBEToLong(theHasher(s));
+		};
+
 		theTree.on('change', function(dRange, d){
 			//Updated loaded ranges and ranges list
+			dRange = PearsonRange.fromString(dRange);
+			addRangeToFragmentsList(dRange);
 			markUsageOf(dRange);
 			saveIndexFragment(dRange, d);
 		});
 
 		theTree.on('delete', function(dRange){
 			//Updated loaded ranges and ranges list
+			dRange = PearsonRange.fromString(dRange);
+			removeRangeFromFragmentsList(dRange);
 			deleteIndexFragment(dRange)
 		});
 
@@ -2615,29 +2625,45 @@
 						return;
 					}
 
+					var fragmentCount = 0;
 					for (var i = 0; i < collectionDirList.length; i++){
 						if (fragmentNameMatcher.test(collectionDirList[i])){
 							//fragmentsList.push(collectionDirList[i]);
 							var parsingState;
 							while ((parsingState = fragmentNameMatcher.exec(collectionDirList[i])) !== null){
-								fragmentsList.push(new PearsonRange(hexToLong(parsingState[0]), hexToLong(parsingState[1])));
+								fragmentCount++;
+								addRangeToFragmentsList(PearsonRange.fromString(parsingState[0], parsingState[1]))
 							}
 						}
 					}
+
+					if (fragmentCount == 0){
+						//No index fragments file has been found, despite an existing collection directory.
+						//The only "range fragment" to be available is the full range.
+						fragmentsList = [PearsonRange.MAX_RANGE];
+					}
+
 					loadCallback();
 				});
 			} else {
-				fragmentsList.push(PearsonRange.MAX_RANGE);
+				mkdirp(collectionPath, function(err){
+					if (err){
+						loadCallback(err);
+						return;
+					}
+
+					//If no index file is found, well there is only one "range fragment" to be availabe : the full range
+					fragmentsList = [PearsonRange.MAX_RANGE];
+					loadCallback();
+				});
 			}
 		});
-
-
 
 		self.lookup = function(key, cb){
 			if (!(typeof key == 'string' || typeof key == 'number')) throw new TypeError('key must be a string or a number');
 			if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
-			var keyHash = theHasher(key);
+			var keyHash = hashToLong(key);
 
 			var inTreeValue = theTree.lookup(key, keyHash);
 
@@ -2668,7 +2694,7 @@
 		self.add = function(key, value, cb){
 			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
 			//We must check that the range that corresponds to the key is currently loaded
-			var keyHash = theHasher(key);
+			var keyHash = hashToLong(key);
 
 			//Check that data range is loaded before performing the addition
 			if (!isRangeOfHashLoaded(keyHash)){
@@ -2691,7 +2717,7 @@
 		self.remove = function(key, value, cb){
 			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
 			//We must check that the range that corresponds to the key is currently loaded
-			var keyHash = theHasher(key);
+			var keyHash = hashToLong(key);
 
 			//Check that the data range is loaded before performing the removal
 			if (!isRangeOfHashLoaded(keyHash)){
@@ -2724,10 +2750,18 @@
 			var fileName = pathJoin(collectionPath, fragmentNameBuilder(fRange));
 			fs.readFile(fileName, function(err, fileData){
 				if (err){
+					//Support the case where the index fragment file doesn't exist (in Node.js and cordova-plugin-file-node-like)
+					if (err.message.indexOf('ENOENT') != -1 || err.message.indexOf('NOT_FOUND_ERR') != -1){
+						if (_cb) _cb();
+						return;
+					}
+					//Throw other errors
 					if (_cb) _cb(err);
 					else throw err;
 					return;
 				}
+
+				fileData = checkReadBuffer(fileData);
 
 				var fragmentPlainText = scryptFileDecode(fileData, collectionKey);
 				var fragmentJSON = deserializeObject(JSON.parse(to_string(fragmentPlainText)));
@@ -2763,6 +2797,9 @@
 
 			var fragmentPlainText = from_string(JSON.stringify(serializeObject(fData)));
 			var fragmentCipherText = scryptFileEncode(fragmentPlainText, collectionKey);
+
+			fragmentCipherText = checkWriteBuffer(fragmentCipherText);
+
 			fs.writeFile(fileName, fragmentCipherText, function(err){
 				if (err){
 					if (_cb) _cb(err);
@@ -2827,8 +2864,8 @@
 				currentDataLoad += dataSize;
 			}
 
-			if (!currentLoadedFragmentsRange[r._rangeStr]){
-				currentLoadedFragmentsRange[r._rangeStr] = r;
+			if (!currentLoadedFragmentsRange[fRangeStr]){
+				currentLoadedFragmentsRange[fRangeStr] = fRange;
 			}
 
 			fragmentsLRU.put(fRangeStr);
