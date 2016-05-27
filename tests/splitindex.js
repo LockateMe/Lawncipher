@@ -18,7 +18,7 @@ var PearsonSeedGenerator = Lawncipher.PearsonSeedGenerator;
 var PearsonHasher = Lawncipher.PearsonHasher;
 var Index = Lawncipher.Index;
 
-var testIndexPath = __dirname;
+var testIndexPath = path.join(__dirname, 'test_index');
 
 var testSeed = [
 	98,  6, 85, 150, 36, 23, 112, 164, 135, 207, 169,  5, 26, 64, 165, 219,
@@ -61,10 +61,10 @@ function basicTests(next){
 	var indexKey = randomBuffer(32);
 
 	function saveIndex(_next){
-		rmdir(path.join(testIndexPath, 'test_index'), function(err){
+		rmdir(testIndexPath, function(err){
 			if (err) throw err;
 
-			var testIndex = new Index(testIndexPath, 'test_index', 'index', indexKey, testSeed, function(loadErr){
+			var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, function(loadErr){
 				if (loadErr) throw loadErr;
 
 				testIndex.add('test', 1, function(e){
@@ -81,7 +81,7 @@ function basicTests(next){
 	}
 
 	function loadIndex(_next){
-		var testIndex = new Index(testIndexPath, 'test_index', 'index', indexKey, testSeed, function(loadErr){
+		var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, function(loadErr){
 			if (loadErr) throw loadErr;
 
 			testIndex.lookup('test', function(err, value){
@@ -105,9 +105,161 @@ function basicTests(next){
 	});
 }
 
+//A testing method, designed to test save, loading, lookup and removal of a non-negligeable data set
+function loadTests(docCount, cb){
+	docCount = docCount || 1000;
+	if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+	var testIndex;
+	var indexKey = randomBuffer(32);
+	var indexSeed = PearsonSeedGenerator();
+
+	var dataSet = new Array(docCount);
+
+	for (var i = 0; i < docCount; i++){
+		dataSet[i] = {k: faker.random.uuid(), v: newRandomUserDoc()};
+	}
+
+	function saveIndex(_next){
+		rmdir(testIndexPath, function(err){
+			if (err) throw err;
+
+			testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, function(loadErr){
+				if (loadErr) throw loadErr;
+
+				var addIndex = 0;
+
+				function addOne(){
+					var currentTuple = dataSet[addIndex];
+					testIndex.add(currentTuple.k, currentTuple.v, function(err){
+						if (err) throw err;
+
+						nextAdd();
+					});
+				}
+
+				function nextAdd(){
+					addIndex++;
+					if (addIndex == docCount){
+						_next();
+					} else {
+						if (addIndex % 100 == 0) setTimeout(addOne, 0);
+						else addOne();
+					}
+				}
+
+				addOne();
+			});
+		});
+	}
+
+	function loadIndex(_next){
+		testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, function(loadErr){
+			if (loadErr) throw loadErr;
+
+			var lookupIndex = 0;
+
+			function lookupOne(){
+				var currentTuple = dataSet[lookupIndex];
+				testIndex.lookup(currentTuple.k, function(err, value){
+					if (err) throw err;
+
+					console.log('lookupIndex: ' + lookupIndex);
+					console.log('Found value: ' + JSON.stringify(value));
+					console.log('Expected value: ' + JSON.stringify(currentTuple.v));
+					assert(deepObjectEquality(currentTuple.v, value));
+
+					nextLookup();
+				});
+			}
+
+			function nextLookup(){
+				lookupIndex++;
+				if (lookupIndex == docCount){
+					_next();
+				} else {
+					if (lookupIndex % 100 == 0) setTimeout(lookupOne, 0);
+					else lookupOne();
+				}
+			}
+
+			lookupOne();
+		});
+	}
+
+	function destroyIndex(_next){
+		if (!testIndex) throw new Error('testIndex must be defined');
+
+		var removeIndex = 0;
+
+		function removeOne(){
+			var currentTuple = dataSet[lookupIndex];
+			testIndex.remove(currentTuple.k, currentTuple.v, function(err){
+				if (err) throw err;
+
+				nextRemoval();
+			});
+		}
+
+		function nextRemoval(){
+			removeIndex++;
+			if (removeIndex == docCount){
+				_next();
+			} else {
+				if (removeIndex % 100 == 0) setTimeout(removeOne, 0);
+				else removeOne();
+			}
+		}
+
+		removeOne();
+	}
+
+	function checkDestruction(_next){
+		if (!testIndex) throw new Error('testIndex must be defined');
+
+		var lookupIndex = 0;
+
+		function lookupOne(){
+			var currentTuple = dataSet[lookupIndex];
+			testIndex.lookup(currentTuple.k, function(err, value){
+				if (err) throw err;
+
+				assert(!value);
+
+				nextLookup();
+			});
+		}
+
+		function nextLookup(){
+			lookupIndex++;
+			if (lookupIndex == docCount){
+				_next();
+			} else {
+				if (lookupIndex % 100 == 0) setTimeout(lookupOne, 0);
+				else lookupOne();
+			}
+		}
+
+		lookupOne();
+	}
+
+	saveIndex(function(){
+		loadIndex(function(){
+			destroyIndex(checkDestruction);
+		});
+	});
+}
+
 console.log('----------------------');
 console.log('Basic index testing');
 console.log('----------------------');
 basicTests(function(){
 	console.log('done');
+	console.log('');
+	console.log('----------------------');
+	console.log('Data load index testing');
+	console.log('----------------------');
+	loadTests(undefined, function(){
+		console.log('done');
+	});
 });
