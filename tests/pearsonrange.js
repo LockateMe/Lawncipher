@@ -10,6 +10,7 @@ var PearsonRange = Lawncipher.PearsonRange;
 
 var bufferBEToLong = Lawncipher.bufferBEToLong;
 var longToBufferBE = Lawncipher.longToBufferBE;
+var randomBuffer = Lawncipher.randomBuffer;
 
 assert(bufferBEToLong(longToBufferBE(highEnd)).equals(highEnd));
 assert(bufferBEToLong(longToBufferBE(lowEnd)).equals(lowEnd));
@@ -69,3 +70,10 @@ assert(part2.containsRange(part2_2));
 assert(part2.isContainedIn(maxRange));
 assert(!part2.containsRange(part1_1));
 assert(!part2.containsRange(part1_2));
+
+//Testing hash membership
+assert(maxRange.contains(PearsonRange.MAX_RANGE.start));
+assert(maxRange.contains(PearsonRange.MAX_RANGE.end));
+assert(part1.contains(PearsonRange.MAX_RANGE.start));
+assert(part2.contains(PearsonRange.MAX_RANGE.end));
+assert(maxRange.contains(bufferBEToLong(randomBuffer(8))));
