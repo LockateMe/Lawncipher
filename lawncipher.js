@@ -160,7 +160,7 @@
 		}
 		regexStr += '(?:_((?:[a-f]|[0-9]){16})_((?:[a-f]|[0-9]){16}))' + (rangeOptional ? '?' : '') + '$';
 
-		return new RegExp(regexStr, 'gi');
+		return new RegExp(regexStr, 'i');
 	}
 
 	function indexNameParser(indexName){
@@ -179,7 +179,7 @@
 					result.name = fileNameParts[i];
 				} else if (extractedAttributes == 1){ //Range start
 					try {
-						result.rangeStart = hexToLong(fileNameParts[i])
+						result.rangeStart = hexToLong(fileNameParts[i]);
 					} catch (e){
 						throw new Error(fileNameParts[i] + ' cannot be parsed to a Long');
 					}
@@ -204,6 +204,7 @@
 		if (indexName && typeof indexName != 'string') throw new TypeError('when defined, indexName must be a string');
 
 		return function(dataRange){
+			if (!(dataRange instanceof PearsonRange)) throw new TypeError('dataRange must be a PearsonRange instance');
 			var nameStr = '_';
 			if (!indexName || indexName == 'index'){
 				nameStr += 'index';
@@ -2627,13 +2628,13 @@
 
 					var fragmentCount = 0;
 					for (var i = 0; i < collectionDirList.length; i++){
-						if (fragmentNameMatcher.test(collectionDirList[i])){
-							//fragmentsList.push(collectionDirList[i]);
-							var parsingState;
-							while ((parsingState = fragmentNameMatcher.exec(collectionDirList[i])) !== null){
-								fragmentCount++;
-								addRangeToFragmentsList(PearsonRange.fromString(parsingState[0], parsingState[1]))
-							}
+						var parsingState = fragmentNameMatcher.exec(collectionDirList[i]);
+						//Skip the files that don't match the naming convention
+						if (!parsingState) continue;
+
+						if (parsingState.length > 1){
+							fragmentCount++;
+							addRangeToFragmentsList(PearsonRange.fromString(parsingState[1] + '_' + parsingState[2]));
 						}
 					}
 
@@ -2642,6 +2643,8 @@
 						//The only "range fragment" to be available is the full range.
 						fragmentsList = [PearsonRange.MAX_RANGE];
 					}
+
+					//console.log('Existing ranges: ' + Array.prototype.join.call(fragmentsList.map(function(v){return v.toString()}), ','));
 
 					loadCallback();
 				});
@@ -2737,12 +2740,55 @@
 			}
 		};
 
-		self.iterator = function(){
+		self.nodeIterator = function(cb){
 			throw new Error('Not yet implemented');
+
+			if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+			function NodeIterator(){
+
+				var currentNode;
+				var currentNodeKeys;
+
+				loadIndexFragmentForHash(PearsonRange.MAX_RANGE.start, function(err){
+					if (err){
+						cb(err);
+						return;
+					}
+
+					currentNode = theTree.rootNode();
+					//Get the most left-side node; i.e the one whose range begins with 0000000000000000.
+					while (!currentNode.isLeaf()){
+						currentNode = currentNode.getLeft();
+					}
+
+				});
+
+				this.next = function(cb){
+
+				};
+
+				this.hasNext = function(){
+
+				};
+
+				function getNextNode(){
+
+				}
+			}
+
+			new NodeIterator();
+		};
+
+		self.iterator = function(cb){
+			if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
 		};
 
 		function loadIndexFragmentForHash(h, _cb){
 			var rangeOfHash = findRangeOfHash(h);
+			if (!rangeOfHash) throw new Error('cannot find range for hash: ' + longToHex(h));
+			//console.log('rangeOf ' + longToHex(h) + ': ' + rangeOfHash.toString());
 			loadIndexFragment(rangeOfHash, _cb);
 		}
 
@@ -2838,6 +2884,7 @@
 		}
 
 		function findRangeOfHash(h){
+			if (!(h instanceof Long)) throw new TypeError('h must be a Long instance');
 			for (var i = 0; i < fragmentsList.length; i++){
 				if (fragmentsList[i].contains(h)) return fragmentsList[i];
 			}
@@ -2885,6 +2932,8 @@
 		}
 
 		function addRangeToFragmentsList(fRange){ //We want to preserve the order in the fragmentsList
+			if (!(fRange instanceof PearsonRange)) throw new TypeError('fRange must be a PearsonRange');
+
 			var foundAt = -1;
 			var insertIndex = -1;
 			for (var i = 0; i < fragmentsList.length; i++){
@@ -3082,6 +3131,10 @@
 			return untriggeredEvents;
 		};
 
+		self.rootNode = function(){
+			return rootNode;
+		}
+
 		/**
 		* Add a {key, value} pair to the tree
 		* @param {String|Number} key - the key (i.e, identifier) that will be used to retrieve the value from the tree
@@ -3112,25 +3165,6 @@
 		*/
 		self.insertRange = function(insertRange, subCollection){
 			if (!(insertRange instanceof PearsonRange)) throw new TypeError('insertRange must be a PearsonRange instance');
-			/*
-			if (typeof startRange == 'string'){
-				if (!(startRange.length == 16 && is_hex(startRange))) throw new TypeError('when startRange is a string, it must be a hex representation of a long (i.e, 8 bytes -> 16 hex chars)');
-				startRange = from_hex(startRange);
-			}
-			if (startRange instanceof Uint8Array){
-				startRange = bufferBEToLong(startRange);
-			}
-			if (!(startRange instanceof Long)) throw new TypeError('startRange must be either a hex string, an 8 byte buffer, or a Long instance');
-
-			if (typeof endRange == 'string'){
-				if (!(endRange.length == 16 && is_hex(endRange))) throw new TypeError('when endRange is a string, it must be a hex representation of a long (i.e, 8 bytes -> 16 hex chars)');
-				endRange = from_hex(endRange);
-			}
-			if (endRange instanceof Uint8Array){
-				endRange = bufferBEToLong(endRange);
-			}
-			if (!(endRange instanceof Long)) throw new TypeError('endRange must be either a hex string, an 8 byte buffer, or a Long instance');
-			*/
 
 			var currentNode = rootNode;
 			var currentNodeRange, nextRanges;
@@ -3142,23 +3176,38 @@
 					isHolderOfRange = true;
 					currentNode.setSubCollection(subCollection);
 				} else {
-					var splittedRange = splitRange(currentNodeRange.start, currentNodeRange.end);
+					var splittedRange = currentNodeRange.split();
 					var leftNode, rightNode;
-					if (isLeaf()){
-						var newLeftNode = new TreeNode(splittedRange[0].start, splittedRange[1].end, undefined, currentNode);
-						var newRightNode = new TreeNode(splittedRange[1].start, splittedRange[1].end, undefined,currentNode)
+					if (currentNode.isLeaf()){
+						var newLeftNode = new TreeNode(splittedRange[0], undefined, currentNode);
+						var newRightNode = new TreeNode(splittedRange[1], undefined,currentNode)
 						//Referencing children nodes to parent
-						thisNode.setLeft(newLeftNode);
-						thisNode.setRight(newRightNode);
+						currentNode.setLeft(newLeftNode);
+						currentNode.setRight(newRightNode);
 						//Setting leftNode and rightNode with the newly created nodes
 						leftNode = newLeftNode;
 						rightNode = newRightNode;
 					} else {
-						leftNode = thisNode.getLeft();
-						rightNode = thisNode.getRight();
+						leftNode = currentNode.getLeft();
+						rightNode = currentNode.getRight();
 					}
 
-					if (isRangeContainedIn(splittedRange[0].start, splittedRange[0].end, insertRange.start, insertRange.end)){
+					if (insertRange.isContainedIn(splittedRange[0])){
+						currentNode = leftNode;
+					} else if (insertRange.isContainedIn(splittedRange[1])){
+						currentNode = rightNode;
+					} else {
+						//Handles the case that insertRange is not an evenly cut range
+						if (!(insertRange.isContainedIn(nextRanges[0]) || insertRange.isContainedIn(nextRanges[1]))){
+							isHolderOfRange = true;
+							currentNode.mergeSubCollection(subCollection, !disallowKeyCollisions)
+						} else {
+							console.error('CRITICAL INTERNAL ERROR : your ranges are messed up')
+							break;
+						}
+					}
+
+					/*if (isRangeContainedIn(splittedRange[0].start, splittedRange[0].end, insertRange.start, insertRange.end)){
 						currentNode = leftNode;
 					} else if (isRangeContainedIn(splittedRange[1].start, splittedRange[1].end, startRange, endRange)){
 						currentNode = rightNode
@@ -3171,7 +3220,7 @@
 							console.error('CRITICAL INTERNAL ERROR : your ranges are messed up')
 							break;
 						}
-					}
+					}*/
 				}
 			} while (!isHolderOfRange);
 		};
@@ -3793,6 +3842,10 @@
 		if (this.start.equals(PearsonRange.MAX_RANGE.start)) return false;
 
 		return this.start.gt(leftRange.end);
+	};
+
+	PearsonRange.prototype.toJSON = function(){
+		return this.toString();
 	};
 
 	PearsonRange.fromString = function(rangeStr){

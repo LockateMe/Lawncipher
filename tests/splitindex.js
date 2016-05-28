@@ -164,9 +164,9 @@ function loadTests(docCount, cb){
 				testIndex.lookup(currentTuple.k, function(err, value){
 					if (err) throw err;
 
-					console.log('lookupIndex: ' + lookupIndex);
-					console.log('Found value: ' + JSON.stringify(value));
-					console.log('Expected value: ' + JSON.stringify(currentTuple.v));
+					//console.log('lookupIndex: ' + lookupIndex);
+					//console.log('Found value: ' + JSON.stringify(value));
+					//console.log('Expected value: ' + JSON.stringify(currentTuple.v));
 					assert(deepObjectEquality(currentTuple.v, value));
 
 					nextLookup();
@@ -193,7 +193,7 @@ function loadTests(docCount, cb){
 		var removeIndex = 0;
 
 		function removeOne(){
-			var currentTuple = dataSet[lookupIndex];
+			var currentTuple = dataSet[removeIndex];
 			testIndex.remove(currentTuple.k, currentTuple.v, function(err){
 				if (err) throw err;
 
@@ -245,7 +245,9 @@ function loadTests(docCount, cb){
 
 	saveIndex(function(){
 		loadIndex(function(){
-			destroyIndex(checkDestruction);
+			destroyIndex(function(){
+				checkDestruction(cb);
+			});
 		});
 	});
 }
