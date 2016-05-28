@@ -106,7 +106,7 @@ function basicTests(next){
 }
 
 //A testing method, designed to test save, loading, lookup and removal of a non-negligeable data set
-function loadTests(docCount, cb){
+function loadTests(docCount, cb, usingNoTrigger){
 	docCount = docCount || 1000;
 	if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
@@ -115,6 +115,8 @@ function loadTests(docCount, cb){
 	var indexSeed = PearsonSeedGenerator();
 
 	var dataSet = new Array(docCount);
+
+	console.log('Generating ' + docCount + ' documents');
 
 	for (var i = 0; i < docCount; i++){
 		dataSet[i] = {k: faker.random.uuid(), v: newRandomUserDoc()};
@@ -127,6 +129,8 @@ function loadTests(docCount, cb){
 			testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, function(loadErr){
 				if (loadErr) throw loadErr;
 
+				console.log('Saving ' + docCount + ' documents' + (usingNoTrigger ? ' (while using noTrigger == true)' : ''));
+
 				var addIndex = 0;
 
 				function addOne(){
@@ -135,7 +139,7 @@ function loadTests(docCount, cb){
 						if (err) throw err;
 
 						nextAdd();
-					});
+					}, usingNoTrigger && addIndex < docCount - 1);
 				}
 
 				function nextAdd(){
@@ -156,6 +160,8 @@ function loadTests(docCount, cb){
 	function loadIndex(_next){
 		testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, function(loadErr){
 			if (loadErr) throw loadErr;
+
+			console.log('Loading and looking up ' + docCount + ' documents');
 
 			var lookupIndex = 0;
 
@@ -190,6 +196,8 @@ function loadTests(docCount, cb){
 	function destroyIndex(_next){
 		if (!testIndex) throw new Error('testIndex must be defined');
 
+		console.log('Removing ' + docCount + ' documents');
+
 		var removeIndex = 0;
 
 		function removeOne(){
@@ -198,7 +206,7 @@ function loadTests(docCount, cb){
 				if (err) throw err;
 
 				nextRemoval();
-			});
+			}, usingNoTrigger && removeIndex < docCount - 1);
 		}
 
 		function nextRemoval(){
@@ -216,6 +224,8 @@ function loadTests(docCount, cb){
 
 	function checkDestruction(_next){
 		if (!testIndex) throw new Error('testIndex must be defined');
+
+		console.log('Checking the non-existence of ' + docCount + ' documents');
 
 		var lookupIndex = 0;
 
@@ -261,7 +271,32 @@ basicTests(function(){
 	console.log('----------------------');
 	console.log('Data load index testing');
 	console.log('----------------------');
+	var st = Date.now();
 	loadTests(undefined, function(){
-		console.log('done');
+		var et = Date.now();
+		var duration = et - st;
+		console.log('done in ' + duration.toString() + 'ms');
+
+		console.log('');
+		console.log('----------------------');
+		console.log('Data load index testing (noTrigger == true)');
+		console.log('----------------------');
+		var st = Date.now();
+		loadTests(undefined, function(){
+			var et = Date.now();
+			var duration = et - st;
+			console.log('done in ' + duration.toString() + 'ms');
+
+			console.log('');
+			console.log('----------------------');
+			console.log('Bigger load index testing');
+			console.log('----------------------');
+			var st = Date.now();
+			loadTests(100000, function(){
+				var et = Date.now();
+				var duration = et - st;
+				console.log('done in ' + duration.toString() + 'ms');
+			}, true);
+		}, true);
 	});
 });
