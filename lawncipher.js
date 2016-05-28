@@ -121,7 +121,31 @@
 	if (!sodium) throw new Error('Error on loading Lawncipher : Libsodium is missing');
 
 	var from_hex = sodium.from_hex, to_hex = sodium.to_hex, from_base64 = sodium.from_base64, to_base64 = sodium.to_base64;
-	var from_string = sodium.string_to_Uint8Array || sodium.from_string, to_string = sodium.uint8Array_to_String || sodium.to_string;
+	var from_string = sodium.string_to_Uint8Array || sodium.from_string;// to_string = sodium.uint8Array_to_String || sodium.to_string;
+
+	var toStringChunkSize = 32767;
+
+	function to_string(bytes) {
+		if (typeof TextDecoder === "function") {
+			return new TextDecoder("utf-8", {fatal: true}).decode(bytes);
+		}
+
+		var numChunks = Math.ceil(bytes.length / toStringChunkSize);
+		if (numChunks > 1){
+			var totalString = '';
+			for (var i = 0; i < numChunks; i++){
+				totalString += to_string(Array.prototype.slice.call(bytes, i * toStringChunkSize, (i + 1) * toStringChunkSize));
+			}
+			return totalString;
+		}
+
+		try {
+			return decodeURIComponent(escape(String.fromCharCode.apply(null, bytes)));
+		}
+		catch (_) {
+			throw new TypeError("The encoded data was not valid.");
+		}
+	}
 
 	var is_hex = function(s){
 		return typeof s == 'string' && s.length % 2 == 0 && /^([a-f]|[0-9])+$/ig.test(s);
@@ -2694,7 +2718,7 @@
 			}
 		};
 
-		self.add = function(key, value, cb){
+		self.add = function(key, value, cb, noTrigger){
 			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
 			//We must check that the range that corresponds to the key is currently loaded
 			var keyHash = hashToLong(key);
@@ -2708,16 +2732,16 @@
 						return;
 					}
 
-					theTree.add(key, value);
+					theTree.add(key, value, noTrigger);
 					if (cb) cb();
 				});
 			} else {
-				theTree.add(key, value);
+				theTree.add(key, value, noTrigger);
 				if (cb) cb();
 			}
 		};
 
-		self.remove = function(key, value, cb){
+		self.remove = function(key, value, cb, noTrigger){
 			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
 			//We must check that the range that corresponds to the key is currently loaded
 			var keyHash = hashToLong(key);
@@ -2731,11 +2755,11 @@
 						return;
 					}
 
-					theTree.remove(key, value);
+					theTree.remove(key, value, noTrigger);
 					if (cb) cb();
 				});
 			} else {
-				theTree.remove(key, value);
+				theTree.remove(key, value, noTrigger);
 				if (cb) cb();
 			}
 		};
@@ -2839,6 +2863,7 @@
 		}
 
 		function saveIndexFragment(fRange, fData, _cb){
+			//console.log('Saving ' + fRange.toString());
 			var fileName = pathJoin(collectionPath, fragmentNameBuilder(fRange));
 
 			var fragmentPlainText = from_string(JSON.stringify(serializeObject(fData)));
@@ -2862,12 +2887,15 @@
 		}
 
 		function deleteIndexFragment(fRange, _cb){
+			//console.log('Deleting ' + fRange.toString());
 			var fragmentPath = pathJoin(collectionPath, fragmentNameBuilder(fRange))
 			fs.unlink(fragmentPath, function(err){
 				if (err){
-					if (_cb) _cb(err);
-					else console.error('Cannot remove index fragment ' + fragmentPath + ': ' + err);
-					return;
+					if (err.message.indexOf('ENOENT') == -1){
+						if (_cb) _cb(err);
+						else console.error('Cannot remove index fragment ' + fragmentPath + ': ' + err);
+						return;
+					}
 				}
 
 				for (var i = 0; i < fragmentsList.length; i++){
