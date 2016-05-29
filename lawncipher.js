@@ -2150,15 +2150,15 @@
 		for (var i = 0; i < objAttributes.length; i++){
 			var currentValue = o[objAttributes[i]];
 			if (typeof currentValue == 'string'){
-				o[objAttributes[i]] = '$string:' + currentValue;
+				o[objAttributes[i]] = '$s:' + currentValue;
 				continue;
 			}
 			if (currentValue instanceof Date){
-				o[objAttributes[i]] = '$date:' + currentValue.getTime();
+				o[objAttributes[i]] = '$d:' + currentValue.getTime();
 				continue;
 			}
 			if (currentValue instanceof Uint8Array){
-				o[objAttributes[i]] = '$buffer:' + to_string(currentValue);
+				o[objAttributes[i]] = '$b:' + to_string(currentValue);
 				continue;
 			}
 		}
@@ -2182,18 +2182,22 @@
 		for (var i = 0; i < objAttributes.length; i++){
 			var currentValue = o[objAttributes[i]];
 			if (typeof currentValue == 'string'){
-				if (currentValue.indexOf('$date:') == 0){
-					currentValue = currentValue.substring('$date:'.length);
+				if (currentValue.indexOf('$d:') == 0 || currentValue.indexOf('$date:') == 0){
+					if (currentValue.indexOf('$d:') == 0) currentValue = currentValue.substring('$d:'.length);
+					else currentValue = currentValue.substring('$date:'.length);
+
 					currentValue = Number(currentValue);
 					if (isNaN(currentValue)){
 						cb('INVALID_DATE_FORMAT');
 						return;
 					}
 					currentValue = new Date(currentValue);
-				} else if (currentValue.indexOf('$string:') == 0){
-					currentValue = currentValue.substring('$string:'.length);
-				} else if (currentValue.indexOf('$buffer:') == 0){
-					currentValue = from_string(currentValue.substring('$buffer:'.length));
+				} else if (currentValue.indexOf('$s:') == 0 || currentValue.indexOf('$string:') == 0){
+					if (currentValue.indexOf('$s:') == 0) currentValue = currentValue.substring('$s:'.length);
+					else currentValue = currentValue.substring('$string:'.length);
+				} else if (currentValue.indexOf('$b:') == 0 || currentValue.indexOf('$buffer:')){
+					if (currentValue.indexOf('$b:') == 0) currentValue = from_string(currentValue.substring('$b:'.length));
+					else currentValue = from_string(currentValue.substring('$buffer:'.length));
 				}
 				o[objAttributes[i]] = currentValue;
 			}
