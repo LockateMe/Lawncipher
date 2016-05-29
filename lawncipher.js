@@ -756,6 +756,8 @@
 			var documentsIndex = null; //Decrypted, parsed and deserialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
 			var serializedIndex = null; //Decrypted, parsed and serialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
 
+			var collectionIndex; // The index instance, containing the <docId, doc> pairs
+
 			for (var i = 0; i < rootIndex.length; i++){
 				if (rootIndex[i].name == name){
 					collectionDescription = rootIndex[i];
@@ -830,7 +832,7 @@
 
 								var migratingToV1_1 = false;
 
-								if (!serializedIndex.pearsonSeed){
+								if (!serializedIndex.pearsonSeed && serializedIndex.documents){
 									migratingToV1_1 = true;
 									serializedIndex.pearsonSeed = PearsonSeedGenerator();
 								}
@@ -2772,7 +2774,8 @@
 			function NodeIterator(){
 
 				var currentNode;
-				var currentNodeKeys;
+				var currentDepth = 0;
+				var currentSide;
 
 				loadIndexFragmentForHash(PearsonRange.MAX_RANGE.start, function(err){
 					if (err){
@@ -2784,7 +2787,9 @@
 					//Get the most left-side node; i.e the one whose range begins with 0000000000000000.
 					while (!currentNode.isLeaf()){
 						currentNode = currentNode.getLeft();
+						currentDepth++;
 					}
+					currentSide = 'l';
 
 				});
 
@@ -2797,7 +2802,14 @@
 				};
 
 				function getNextNode(){
+					if (currentDepth == 0) return;
 
+					if (currentSide == 'l'){ //Getting right-side neighbor
+						currentNode = currentNode.parent().getRight();
+
+					} else if (currentSide == 'r'){ //Getting to parent's sibling
+
+					}
 				}
 			}
 
@@ -3077,7 +3089,7 @@
 
 		var self = this;
 
-		var untriggeredEvents = [];
+		var eventsQueue = [];
 
 		//The events that are triggered
 		//'change', parameters: range_string, subCollection
@@ -3126,12 +3138,14 @@
 		};
 
 		//Event postponing is used if timeouts are not
-		self.triggerUntriggeredEvents = function(){
+		self.triggerEvents = function(){
+			if (eventsQueue.length == 0) return;
+
 			var changeEvents = {}; //{rangeId, subCollectionRef}
 			var deleteEvents = {}; //{rangeId, true}
 			//Roll-up the events log
-			for (var i = 0; i < untriggeredEvents.length; i++){
-				var currEvent = untriggeredEvents[i];
+			for (var i = 0; i < eventsQueue.length; i++){
+				var currEvent = eventsQueue[i];
 				if (currEvent._change){
 					changeEvents[currEvent.rangeStr] = currEvent.subCollection;
 					delete deleteEvents[currEvent.rangeStr];
@@ -3149,14 +3163,33 @@
 			for (var i = 0; i < deleteList.length; i++){
 				triggerEv('delete', [deleteList[i]]);
 			}
+			eventsQueue = [];
 		};
 
-		self.clearUntriggeredEvents = function(){
-			untriggeredEvents = [];
+		self.clearEventsQueue = function(){
+			eventsQueue = [];
 		};
 
-		self.getUntriggeredEvents = function(){
-			return untriggeredEvents;
+		self.getEventsQueue = function(){
+			return eventsQueue;
+		};
+
+		self.scheduleEvents = function(events, noTrigger){
+			if (noTrigger || eventsQueue.length > 0){
+				Array.prototype.push.apply(eventsQueue, events);
+
+				if (!noTrigger) self.triggerEvents();
+			} else {
+				for (var i = 0; i < events.length; i++){
+					if (events[i]._change){
+						triggerEv('change', [events[i].rangeStr, events[i].subCollection]);
+					} else if (events[i]._delete){
+						triggerEv('delete', [events[i].rangeStr]);
+					} else {
+						console.error('Internal error in Lawncipher\'s indexes : what is that event? ' + JSON.stringify(events[i]));
+					}
+				}
+			}
 		};
 
 		self.rootNode = function(){
@@ -3208,7 +3241,7 @@
 					var leftNode, rightNode;
 					if (currentNode.isLeaf()){
 						var newLeftNode = new TreeNode(splittedRange[0], undefined, currentNode);
-						var newRightNode = new TreeNode(splittedRange[1], undefined,currentNode)
+						var newRightNode = new TreeNode(splittedRange[1], undefined, currentNode);
 						//Referencing children nodes to parent
 						currentNode.setLeft(newLeftNode);
 						currentNode.setRight(newRightNode);
@@ -3447,7 +3480,7 @@
 				}
 
 				if (isLeaf()){
-					var newDataSize = jsonSize(value);
+					var newDataSize = docSize(value, key);
 					var newNodeSize = currentDataSize + newDataSize;
 					if (newNodeSize >= maxBinWidth){
 						splitNode(noTrigger);
@@ -3467,12 +3500,8 @@
 							else subCollection[key] = [value];
 						}
 
-						if (noTrigger){
-							untriggeredEvents.push({_change: true, rangeStr: getRangeString(thisNode.range()), subCollection: subCollection});
-						} else {
-							self.triggerUntriggeredEvents();
-							triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
-						}
+						self.scheduleEvents([{_change: true, rangeStr: getRangeString(thisNode.range()), subCollection: subCollection}], noTrigger);
+						//if (!noTrigger) self.triggerEvents();
 					}
 				} else {
 					if (hash.lte(middlePoint)){
@@ -3510,7 +3539,7 @@
 				if (isLeaf()){
 					if (!subCollection[key]) return;
 
-					var dataSizeToRemove = (value && jsonSize(value)) || jsonSize(subCollection[key]);
+					var dataSizeToRemove = (value && docSize(value, key)) || jsonSize(subCollection[key]);
 					currentDataSize -= dataSizeToRemove;
 					if (value && !disallowKeyCollisions){
 						if (subCollection[key]){
@@ -3530,12 +3559,8 @@
 						//Do not trigger events from this method in this case. They will be triggered by the mergeWithSibling call
 						mergeWithSibling(noTrigger);
 					} else {
-						if (noTrigger){
-							untriggeredEvents.push({_change: true, rangeStr: getRangeString(thisNode.range()), subCollection: subCollection});
-						} else {
-							self.triggerUntriggeredEvents();
-							triggerEv('change', [getRangeString(thisNode.range()), subCollection]);
-						}
+						self.scheduleEvents([{_change: true, rangeStr: getRangeString(thisNode.range()), subCollection: subCollection}] , noTrigger);
+						//if (!noTrigger) self.triggerEvents();
 					}
 				} else {
 					if (hash.lte(middlePoint)){
@@ -3667,24 +3692,12 @@
 				parent.setSubCollection(mergedSubCollection);
 
 				//trigger delete events for sub-ranges for this node and its sibling
-				/*if (!noTrigger){
-					triggerEv('delete', [getRangeString(thisNodeRange)]);
-					triggerEv('delete', [getRangeString(siblingBinnedRange.range)]);
-					triggerEv('change', [getRangeString(parent.range()), mergedSubCollection]);
-				}*/
-
-				if (noTrigger){
-					untriggeredEvents.push(
-						{_delete: true, rangeStr: thisNodeRange.toString()},
-						{_delete: true, rangeStr: siblingBinnedRange.range.toString()},
-						{_change: true, rangeStr: parent.range().toString(), subCollection: mergedSubCollection}
-					);
-				} else {
-					self.triggerUntriggeredEvents();
-					triggerEv('delete', [thisNodeRange.toString()]);
-					triggerEv('delete', [siblingBinnedRange.range.toString()]);
-					triggerEv('change', [parent.range().toString(), mergedSubCollection]);
-				}
+				self.scheduleEvents([
+					{_delete: true, rangeStr: thisNodeRange.toString()},
+					{_delete: true, rangeStr: siblingBinnedRange.range.toString()},
+					{_change: true, rangeStr: parent.range().toString(), subCollection: mergedSubCollection}
+				], noTrigger);
+				//if (!noTrigger) self.triggerEvents();
 			}
 
 			function splitNode(noTrigger){
@@ -3715,24 +3728,12 @@
 				//Clear data from this node
 				subCollection = null;
 				//Trigger events
-				/*if (!noTrigger){
-					triggerEv('delete', [dataRange.toString()]);
-					triggerEv('change', [leftRange.toString(), leftSubCollection]);
-					triggerEv('change', [rightRange.toString(), rightSubCollection]);
-				}*/
-
-				if (noTrigger){
-					untriggeredEvents.push(
-						{_delete: true, rangeStr: dataRange.toString()},
-						{_change: true, rangeStr: leftRange.toString(), subCollection: leftSubCollection},
-						{_change: true, rangeStr: rightRange.toString(), subCollection: rightSubCollection}
-					);
-				} else {
-					self.triggerUntriggeredEvents();
-					triggerEv('delete', [dataRange.toString()]);
-					triggerEv('change', [leftRange.toString(), leftSubCollection]);
-					triggerEv('change', [rightRange.toString(), rightSubCollection]);
-				}
+				self.scheduleEvents([
+					{_delete: true, rangeStr: dataRange.toString()},
+					{_change: true, rangeStr: leftRange.toString(), subCollection: leftSubCollection},
+					{_change: true, rangeStr: rightRange.toString(), subCollection: rightSubCollection}
+				], noTrigger);
+				//if (!noTrigger) self.triggerEvents();
 			}
 		}
 
@@ -4011,6 +4012,10 @@
 		}
 
 		return oSize;
+	}
+
+	function docSize(doc, id){
+		return jsonSize(doc) + ((id && jsonSize(id)) || 0);
 	}
 
 	exports.Index = Index;
