@@ -3428,6 +3428,7 @@
 				}
 
 				subCollection = _subCollection;
+				currentDataSize = jsonSize(subCollection);
 				thisNode._subCollection = _subCollection;
 			};
 
