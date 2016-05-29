@@ -57,6 +57,12 @@ function newRandomUserDoc(){
 	};
 }
 
+function clock(s){
+	if (!s) return process.hrtime();
+	var d = process.hrtime(s);
+	return Math.round(d[0] * 1000 + d[1] / 1000000);
+}
+
 function basicTests(next){
 	var indexKey = randomBuffer(32);
 
@@ -271,30 +277,27 @@ basicTests(function(){
 	console.log('----------------------');
 	console.log('Data load index testing');
 	console.log('----------------------');
-	var st = Date.now();
+	var st1 = clock();
 	loadTests(undefined, function(){
-		var et = Date.now();
-		var duration = et - st;
+		var duration = clock(st1);
 		console.log('done in ' + duration.toString() + 'ms');
 
 		console.log('');
 		console.log('----------------------');
 		console.log('Data load index testing (noTrigger == true)');
 		console.log('----------------------');
-		var st = Date.now();
+		var st2 = clock();
 		loadTests(undefined, function(){
-			var et = Date.now();
-			var duration = et - st;
+			var duration = clock(st2);
 			console.log('done in ' + duration.toString() + 'ms');
 
 			console.log('');
 			console.log('----------------------');
 			console.log('Bigger load index testing');
 			console.log('----------------------');
-			var st = Date.now();
+			var st3 = clock();
 			loadTests(100000, function(){
-				var et = Date.now();
-				var duration = et - st;
+				var duration = clock(st3);
 				console.log('done in ' + duration.toString() + 'ms');
 			}, true);
 		}, true);
