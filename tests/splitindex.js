@@ -132,6 +132,7 @@ function loadTests(docCount, cb, usingNoTrigger){
 		rmdir(testIndexPath, function(err){
 			if (err) throw err;
 
+			console.log('Starting index writes');
 			var saveStart = clock();
 			testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, function(loadErr){
 				if (loadErr) throw loadErr;
