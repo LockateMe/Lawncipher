@@ -2928,7 +2928,7 @@
 
 		function unloadIndexFragment(_cb){
 			var fRangeStr = fragmentsLRU.lru();
-			if (fRangeStr){ //If the LRU set returns nothing, then there is nothing to be unloaded
+			if (!fRangeStr){ //If the LRU set returns nothing, then there is nothing to be unloaded
 				if (_cb) _cb();
 				return;
 			}
