@@ -132,38 +132,58 @@ function loadTests(docCount, cb, usingNoTrigger){
 		rmdir(testIndexPath, function(err){
 			if (err) throw err;
 
+			var saveStart = clock();
 			testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, function(loadErr){
 				if (loadErr) throw loadErr;
 
-				console.log('Saving ' + docCount + ' documents' + (usingNoTrigger ? ' (while using noTrigger == true)' : ''));
+				console.log('Saving ' + docCount + ' documents' + (usingNoTrigger ? ' (while using noTrigger = true)' : ''));
 
-				var addIndex = 0;
+				if (usingNoTrigger){
+					for (var i = 0; i < docCount - 1; i++){
+						testIndex.add(dataSet[i].k, dataSet[i].v, undefined, true);
+					}
 
-				function addOne(){
-					var currentTuple = dataSet[addIndex];
-					testIndex.add(currentTuple.k, currentTuple.v, function(err){
+					testIndex.add(dataSet[dataSet.length - 1].k, dataSet[dataSet.length - 1].v, function(err){
 						if (err) throw err;
 
-						nextAdd();
-					}, usingNoTrigger && addIndex < docCount - 1);
-				}
-
-				function nextAdd(){
-					addIndex++;
-					if (addIndex == docCount){
+						var saveDuration = clock(saveStart);
+						console.log('Saving ' + docCount + ' documents took ' + saveDuration + 'ms (noTrigger = true)');
 						_next();
-					} else {
-						if (addIndex % 100 == 0) setTimeout(addOne, 0);
-						else addOne();
-					}
-				}
+					});
+				} else {
+					//usingNoTrigger == false -> async everything
 
-				addOne();
+					var addIndex = 0;
+
+					function addOne(){
+						var currentTuple = dataSet[addIndex];
+						testIndex.add(currentTuple.k, currentTuple.v, function(err){
+							if (err) throw err;
+
+							nextAdd();
+						});
+					}
+
+					function nextAdd(){
+						addIndex++;
+						if (addIndex == docCount){
+							var saveDuration = clock(saveStart);
+							console.log('Saving ' + docCount + ' documents took ' + saveDuration + 'ms (noTrigger = false)')
+							_next();
+						} else {
+							if (addIndex % 100 == 0) setTimeout(addOne, 0);
+							else addOne();
+						}
+					}
+
+					addOne();
+				}
 			});
 		});
 	}
 
 	function loadIndex(_next){
+		var loadStart = clock();
 		testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, function(loadErr){
 			if (loadErr) throw loadErr;
 
@@ -188,6 +208,8 @@ function loadTests(docCount, cb, usingNoTrigger){
 			function nextLookup(){
 				lookupIndex++;
 				if (lookupIndex == docCount){
+					var loadDuration = clock(loadStart);
+					console.log('Loading and looking up ' + docCount + ' documents took ' + loadDuration + 'ms');
 					_next();
 				} else {
 					if (lookupIndex % 100 == 0) setTimeout(lookupOne, 0);
@@ -204,34 +226,55 @@ function loadTests(docCount, cb, usingNoTrigger){
 
 		console.log('Removing ' + docCount + ' documents');
 
-		var removeIndex = 0;
+		var destroyStart = clock();
 
-		function removeOne(){
-			var currentTuple = dataSet[removeIndex];
-			testIndex.remove(currentTuple.k, undefined, function(err){
+		if (usingNoTrigger){
+			for (var i = 0; i < docCount - 1; i++){
+				testIndex.remove(dataSet[i].k, undefined, undefined, true);
+			}
+
+			testIndex.remove(dataSet[docCount - 1].k, undefined, function(err){
 				if (err) throw err;
 
-				nextRemoval();
-			}, usingNoTrigger && removeIndex < docCount - 1);
-		}
-
-		function nextRemoval(){
-			removeIndex++;
-			if (removeIndex == docCount){
+				var destroyDuration = clock(destroyStart);
+				console.log('Removing ' + docCount + ' documents took ' + destroyDuration + 'ms (noTrigger = true)');
 				_next();
-			} else {
-				if (removeIndex % 100 == 0) setTimeout(removeOne, 0);
-				else removeOne();
-			}
-		}
+			});
 
-		removeOne();
+		} else {
+			var removeIndex = 0;
+
+			function removeOne(){
+				var currentTuple = dataSet[removeIndex];
+				testIndex.remove(currentTuple.k, undefined, function(err){
+					if (err) throw err;
+
+					nextRemoval();
+				}, usingNoTrigger && removeIndex < docCount - 1);
+			}
+
+			function nextRemoval(){
+				removeIndex++;
+				if (removeIndex == docCount){
+					var destroyDuration = clock(destroyStart);
+					console.log('Removing ' + docCount + ' documents took ' + destroyDuration + 'ms (noTrigger = false)');
+					_next();
+				} else {
+					if (removeIndex % 100 == 0) setTimeout(removeOne, 0);
+					else removeOne();
+				}
+			}
+
+			removeOne();
+		}
 	}
 
 	function checkDestruction(_next){
 		if (!testIndex) throw new Error('testIndex must be defined');
 
 		console.log('Checking the non-existence of ' + docCount + ' documents');
+
+		var lookupStart = clock();
 
 		var lookupIndex = 0;
 
@@ -249,6 +292,8 @@ function loadTests(docCount, cb, usingNoTrigger){
 		function nextLookup(){
 			lookupIndex++;
 			if (lookupIndex == docCount){
+				var lookupDuration = clock(lookupStart);
+				console.log('Looking up ' + docCount + ' non-existing docs took ' + lookupDuration + 'ms');
 				_next();
 			} else {
 				if (lookupIndex % 100 == 0) setTimeout(lookupOne, 0);
@@ -299,6 +344,16 @@ basicTests(function(){
 			loadTests(100000, function(){
 				var duration = clock(st3);
 				console.log('done in ' + duration.toString() + 'ms');
+
+				console.log('');
+				console.log('----------------------');
+				console.log('Mega load index testing (1M docs)');
+				console.log('----------------------');
+				var st4 = clock();
+				loadTests(1000000, function(){
+					var duration = clock(st4);
+					console.log('done in ' + duration.toString() + 'ms');
+				}, true);
 			}, true);
 		}, true);
 	});
