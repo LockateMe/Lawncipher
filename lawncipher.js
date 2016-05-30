@@ -793,10 +793,13 @@
 			var collectionDescription; //The object to be added to the collection list, describing the current collection
 			var collectionPath = pathJoin(rootPath, collectionName); //Root directory of the collection
 			var indexFilePath = pathJoin(collectionPath, '_index'); //Index file of the collection
+
+			//var collection
 			var documentsIndex = null; //Decrypted, parsed and deserialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
 			var serializedIndex = null; //Decrypted, parsed and serialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
 
 			var collectionIndex; // The index instance, containing the <docId, doc> pairs
+			var indexesSeeds = {};
 
 			for (var i = 0; i < rootIndex.length; i++){
 				if (rootIndex[i].name == name){
@@ -873,12 +876,18 @@
 								var migratingToV1_1 = false;
 
 								if (!serializedIndex.pearsonSeed && serializedIndex.documents){
+									console.log('Migrating DB format to v1.1');
 									migratingToV1_1 = true;
-									serializedIndex.pearsonSeed = PearsonSeedGenerator();
+
+									serializedIndex.seeds = indexesSeeds;
+									indexesSeeds._index = PearsonSeedGenerator();
+								} else {
+									//
+
 								}
 
 								//Deserialize every object in the index.
-								documentsIndex = {indexModel: serializedIndex.indexModel, documents: {}, docCount: serializedIndex.docCount, collectionSize: serializedIndex.collectionSize, pearsonSeed: serializedIndex.pearsonSeed};
+								documentsIndex = {indexModel: serializedIndex.indexModel, docCount: serializedIndex.docCount, collectionSize: serializedIndex.collectionSize, pearsonSeed: serializedIndex.pearsonSeed};
 
 								if (migratingToV1_1){
 									var docsIds = Object.keys(serializedIndex.documents);
@@ -890,6 +899,9 @@
 									//Insert in tree
 								} else {
 									//Load tree
+									collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, function(loadIndexErr){
+
+									});
 								}
 
 								//Checking that if an indexModel is provided as a parameter of this call, it hasn't changed with the one already saved on file.
@@ -935,8 +947,10 @@
 							//Creating new documents index, encrypting and saving it. Given the indexModel...
 							var newDocumentsIndex = clone(collectionIndexFileModel);
 							if (indexModel) newDocumentsIndex.indexModel = indexModel;
-							documentsIndex = newDocumentsIndex;
+							//documentsIndex = newDocumentsIndex;
 							serializedIndex = clone(documentsIndex);
+							serializedIndex.seeds = indexesSeeds;
+							indexesSeeds._index = PearsonSeedGenerator();
 
 							mkdirp(collectionPath, function(err){
 								if (err){
@@ -2602,17 +2616,18 @@
 		return bCopy;
 	}
 
-	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, loadCallback, _maxLoadedDataSize){
+	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, loadCallback, _maxLoadedDataSize, _maxNodeSize){
 		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('collectionName must be a non-empty string');
 		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('indexName must be a non-empty string');
 		if (!(collectionKey instanceof Uint8Array && collectionKey.length == 32)) throw new TypeError('collectionKey must be a 32-byte Uint8Array');
 		if (!(Array.isArray(pearsonSeed) && pearsonSeed.length == 256)) throw new TypeError('pearsonSeed must be an array containing a permutation of integers in the range [0; 255]');
 		if (typeof loadCallback != 'function') throw new TypeError('loadCallback must be a function');
 		if (_maxLoadedDataSize && !(typeof _maxLoadedDataSize == 'number' && Math.floor(_maxLoadedDataSize) == _maxLoadedDataSize) && _maxLoadedDataSize > 0) throw new TypeError('when defined, _maxLoadedDataSize must be a strictly positive integer');
+		if (_maxNodeSize && !(typeof _maxNodeSize == 'number' && Math.floor(_maxNodeSize) == _maxNodeSize && _maxNodeSize > 0)) throw new TypeError('when defined, _maxNodeSize must be a strictly positive integer');
 
 		var self = this;
 
-		var collectionPath = pathJoin(rootPath, collectionName);
+		var collectionPath = rootPath ? pathJoin(rootPath, collectionName) : collectionName;
 
 		//If indexName == 'index' or '_index', meaning that this index is central collection
 		//Else, this index is an attribute search index. Hence, nodes have to allow multiple values for a given key
@@ -2667,7 +2682,7 @@
 		var fragmentsLRU = new LRUStringSet();
 
 		var theHasher = PearsonHasher(pearsonSeed);
-		var theTree = new PearsonBPlusTree(53248, theHasher, !attributeIndex); //Key collisions are disallowed on attribute/searchIndex
+		var theTree = new PearsonBPlusTree(_maxNodeSize || 53248, theHasher, !attributeIndex); //Key collisions are disallowed on attribute/searchIndex
 
 		var hashToLong = function(s){
 			return bufferBEToLong(theHasher(s));
@@ -2810,60 +2825,69 @@
 			}
 		};
 
-		self.nodeIterator = function(cb){
-			throw new Error('Not yet implemented');
-
-			if (typeof cb != 'function') throw new TypeError('cb must be a function');
+		self.nodeIterator = function(){
+			//throw new Error('Not yet implemented');
 
 			function NodeIterator(){
 
-				var currentNode;
-				var currentDepth = 0;
-				var currentSide;
+				//Iterate over the fragments list
+				var currentRange;
 
-				loadIndexFragmentForHash(PearsonRange.MAX_RANGE.start, function(err){
-					if (err){
-						cb(err);
+				var thisIterator = this;
+
+				this.next = function(cb){
+					if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+					if (!currentRange) currentRange = findRangeOfHash(PearsonRange.MAX_RANGE.start);
+					else if (thisIterator.hasNext()){
+						currentRange = findRangeOfHash(currentRange.end.add(1));
+					} else {
+						cb();
 						return;
 					}
 
-					currentNode = theTree.rootNode();
-					//Get the most left-side node; i.e the one whose range begins with 0000000000000000.
-					while (!currentNode.isLeaf()){
-						currentNode = currentNode.getLeft();
-						currentDepth++;
-					}
-					currentSide = 'l';
+					loadIndexFragment(currentRange, function(err, receiverNode){
+						if (err){
+							cb(err);
+							return;
+						}
 
-				});
+						cb(null, receiverNode);
+					});
+				};
+
+				this.hasNext = function(){
+					return !(currentRange && currentRange.end.equals(PearsonRange.MAX_RANGE.end));
+				};
+			}
+
+			return new NodeIterator();
+		};
+
+		/*self.iterator = function(cb){
+			function KeyValueIterator(){
+
+				var thisIterator = this;
+
+				var nodeIterator = self.nodeIterator();
+				var currentNode;
+				var currentNodeSubcollection;
+				var currentNodeIteratedSet;
+				var currentNodeIteratedIndex;
 
 				this.next = function(cb){
+					if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
 
 				};
 
 				this.hasNext = function(){
-
+					return nodeIterator.hasNext();
 				};
-
-				function getNextNode(){
-					if (currentDepth == 0) return;
-
-					if (currentSide == 'l'){ //Getting right-side neighbor
-						currentNode = currentNode.parent().getRight();
-
-					} else if (currentSide == 'r'){ //Getting to parent's sibling
-
-					}
-				}
 			}
 
-			new NodeIterator();
-		};
-
-		self.iterator = function(cb){
-			if (typeof cb != 'function') throw new TypeError('cb must be a function');
-
-		};
+			return new KeyValueIterator();
+		};*/
 
 		function loadIndexFragmentForHash(h, _cb){
 			var rangeOfHash = findRangeOfHash(h);
@@ -2892,13 +2916,13 @@
 				var fragmentPlainText = scryptFileDecode(fileData, collectionKey);
 				var fragmentJSON = deserializeObject(JSON.parse(to_string(fragmentPlainText)));
 
-				theTree.insertRange(fRange, fragmentJSON);
+				var receiverNode = theTree.insertRange(fRange, fragmentJSON);
 
 				markUsageOf(fRange, fragmentPlainText.length);
 
 				checkMemoryUsage();
 
-				if (_cb) _cb();
+				if (_cb) _cb(undefined, receiverNode);
 			});
 		}
 
@@ -3271,6 +3295,7 @@
 		self.insertRange = function(insertRange, subCollection){
 			if (!(insertRange instanceof PearsonRange)) throw new TypeError('insertRange must be a PearsonRange instance');
 
+			var receiverNode;
 			var currentNode = rootNode;
 			var currentNodeRange, nextRanges;
 			var isHolderOfRange = false;
@@ -3280,6 +3305,7 @@
 				if (currentNodeRange.equals(insertRange)){
 					isHolderOfRange = true;
 					currentNode.setSubCollection(subCollection);
+					receiverNode = currentNode;
 				} else {
 					var splittedRange = currentNodeRange.split();
 					var leftNode, rightNode;
@@ -3306,6 +3332,7 @@
 						if (!(insertRange.isContainedIn(nextRanges[0]) || insertRange.isContainedIn(nextRanges[1]))){
 							isHolderOfRange = true;
 							currentNode.mergeSubCollection(subCollection, !disallowKeyCollisions)
+							receiverNode = currentNode;
 						} else {
 							console.error('CRITICAL INTERNAL ERROR : your ranges are messed up')
 							break;
@@ -3328,6 +3355,8 @@
 					}*/
 				}
 			} while (!isHolderOfRange);
+
+			return receiverNode;
 		};
 
 		/**
@@ -3402,6 +3431,12 @@
 
 			return rootNode.lookup(key, hash);
 		};
+
+		/*self.lookupNodeForRange = function(fRange){
+			if (!(fRange instanceof PearsonRange)) throw new TypeError('fRange must be a PearsonRange');
+
+			return rootNode.lookupNodeForRange(fRange);
+		};*/
 
 		/*self.getDistribution = function(){
 
@@ -3632,6 +3667,18 @@
 					}
 				}
 			};
+
+			/*thisNode.lookupNodeForRange = function(fRange){
+				if (thisNode.isLeaf()){
+					return thisNode;
+				} else {
+					if (left.range().contains(fRange)){
+						return left.lookupNodeForRange(fRange);
+					} else {
+						return right.lookupNodeForRange(fRange);
+					}
+				}
+			};*/
 
 			/**
 			* Get data range of tree node
