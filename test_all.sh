@@ -13,6 +13,8 @@ echo "-----------------------------------"
 echo "Unit testing Lawncipher's internals"
 echo "-----------------------------------"
 echo ""
+echo "to_string() with big Uint8Arrays"
+node tests/tostring.js
 echo "LRU String Set"
 node tests/lru.js
 echo "Pearson Seed Generator"
