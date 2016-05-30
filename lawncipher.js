@@ -3374,6 +3374,7 @@
 			do {
 				currentNodeRange = currentNode.range();
 				if (currentNodeRange.equals(tRange)){
+					isHolderOfRange = true;
 					if (currentNode == rootNode){ //If we are still at the root node, trimming will result in de-referencing the subCollection the root node contains
 						rootNode.setSubCollection({});
 					} else {
@@ -3402,9 +3403,9 @@
 						}
 					} else {
 						var nextRanges = currentNodeRange.split();
-						if (nextRanges[0].contains(tRange)){
+						if (nextRanges[0].containsRange(tRange)){
 							currentNode = currentNode.getLeft();
-						} else if (nextRanges[1].contains(tRange)){
+						} else if (nextRanges[1].containsRange(tRange)){
 							currentNode = currentNode.getRight();
 						} else {
 							console.error('You got lost');
