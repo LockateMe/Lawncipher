@@ -199,11 +199,10 @@
 
 	//var defaultScryptParams = {r: 8, p: 1, opsLimit: 16384};
 	var minFileSize = sodium.crypto_secretbox_NONCEBYTES + sodium.crypto_secretbox_MACBYTES + 1;
-	var collectionIndexFileModel = {
+	var collectionMetaFileModel = {
 		indexModel: null,
-		documents: {},
-		docCount: 0,
-		collectionSize: 0 //The summed-up sizes of all collection blobs. Index size not taken into account
+		indexesSeeds: {},
+		collectionBlobSize: 0 //The summed-up sizes of all collection blobs. Index size not taken into account
 	};
 	var permittedIndexTypes = ['string', 'date', 'number', 'boolean', 'object', 'array', 'buffer', '*'];
 	var purgeIntervalValue = 5000;
@@ -792,11 +791,12 @@
 
 			var collectionDescription; //The object to be added to the collection list, describing the current collection
 			var collectionPath = pathJoin(rootPath, collectionName); //Root directory of the collection
-			var indexFilePath = pathJoin(collectionPath, '_index'); //Index file of the collection
+			var metaFilePath = path(collectionPath, '_meta');
+			var legacy_indexFilePath = pathJoin(collectionPath, '_index'); //Index file of the collection
 
-			//var collection
-			var documentsIndex = null; //Decrypted, parsed and deserialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
-			var serializedIndex = null; //Decrypted, parsed and serialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
+			var collectionMeta = null; // An object, containing the settings/meta-data of the collection (PearsonSeed, IndexModel,...). Sourced from the _meta file
+			//var documentsIndex = null; //Decrypted, parsed and deserialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
+			//var serializedIndex = null; //Decrypted, parsed and serialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
 
 			var collectionIndex; // The index instance, containing the <docId, doc> pairs
 			var indexesSeeds = {};
@@ -823,122 +823,217 @@
 						return;
 					}
 
-					loadDocumentsIndex();
+					initCollectionFiles();
 				});
-			} else loadDocumentsIndex();
+			} else initCollectionFiles();
 
-			function loadDocumentsIndex(){
-				fsExists(indexFilePath, function(indexExists){
+			function initCollectionFiles(){
+				fsExists(metaFilePath, function(metaExists){
+					if (metaExists){
+						fs.readFile(metaFilePath, function(err, data){
+							if (err){
+								console.error('Error while reading _meta file for collection ' + collectionName + ': ' + err);
+								cb(err);
+								return;
+							}
+
+							if (!k) k = from_hex(collectionDescription.key);
+
+							var encryptedMetaBuffer = checkReadBuffer(data);
+							var decryptedMetaBuffer;
+							try {
+								decryptedMetaBuffer = scryptFileDecode(encryptedMetaBuffer, k);
+							} catch (e){
+								console.error('Can\'t decrypt _meta file for collection ' + collectionName);
+								cb('INVALID_ROOTKEY');
+								return;
+							}
+
+							try {
+								collectionMeta = JSON.parse(to_string(decryptedMetaBuffer));
+							} catch (e){
+								cb('INVALID_META');
+								return;
+							}
+
+							indexesSeeds = collectionMeta.indexesSeeds;
+
+							collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, function(loadIndexErr){
+								if (err){
+									console.error('Load error - cannot init the collection index: ' + err);
+									cb(err);
+									return;
+								}
+
+								processInitParams();
+							});
+						});
+
+					} else {
+						fsExists(legacy_indexFilePath, function(legacyIndexExists){
+							if (legacyIndexExists){
+								migrateV1DocumentsIndex();
+								return;
+							}
+
+							var newMetaIndex = clone(collectionMetaFileModel);
+							if (indexModel) newMetaIndex.indexModel = indexModel;
+
+							indexesSeeds = {_index: PearsonSeedGenerator()};
+							newMetaIndex.indexesSeeds = indexesSeeds;
+
+							collectionMeta = newMetaIndex;
+
+							mkdirp(collectionPath, function(err){
+								if (err){
+									cb(err);
+									return;
+								}
+
+								saveMetaIndex(function(err){
+									if (err){
+										cb(err);
+										return;
+									}
+
+									purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue);
+									cb(undefined, self);
+								});
+							});
+						});
+					}
+				});
+			}
+
+			function processInitParams(){
+				//Checking that if an indexModel is provided as a parameter of this call, it hasn't changed with the one already saved on file.
+				if (indexModel && collectionMeta.indexModel){
+					if (!deepObjectEquality(collectionMeta.indexModel, indexModel)){
+						//If it does, update
+						console.log('Updating indexModel of collection ' + collectionName + ' to ' + JSON.stringify(indexModel));
+						collectionMeta.indexModel = indexModel;
+						collectionDescription.indexModel = indexModel;
+						saveRootIndex(function(err){ //Saving root Lawncipher index (updating collection description)
+							if (err){
+								cb(err);
+								return;
+							}
+							saveMetaIndex(function(err){ //Saving collection index, with updated indexModel attribute
+								if (err){
+									cb(err);
+									return;
+								}
+								endCollectionLoad();
+							});
+						});
+					} else {
+						//Else : provided indexModel is the same as is already used by collection (namely, indexModel ==== documentsIndex.indexModel). No change to be done
+						endCollectionLoad();
+					}
+				} else {
+					indexModel = collectionMeta.indexModel;
+					endCollectionLoad();
+				}
+
+				function endCollectionLoad(){
+					purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue);
+					cb(undefined, self);
+				}
+			}
+
+			function migrateV1DocumentsIndex(){
+				console.log('Migrating DB from v1');
+				fs.readFile(indexFilePath, function(err, data){
+					if (err){
+						console.error('Error while reading index file for collection ' + collectionName + ': ' + err);
+						cb(err);
+						return
+					}
+
+					//var encryptedFileBuffer = from_base64(data);
+					var encryptedFileBuffer = checkReadBuffer(data);
+					collectionIndexSize = data.length;
+					if (encryptedFileBuffer.length < minFileSize){
+						console.error('Error while reading index file for collection ' + collectionName + ': invalid file size');
+						cb('INVALID_INDEX');
+						return;
+					}
+
+					var nonceBuffer = new Uint8Array(sodium.crypto_secretbox_NONCEBYTES);
+					for (var i = 0; i < sodium.crypto_secretbox_NONCEBYTES; i++){
+						nonceBuffer[i] = encryptedFileBuffer[i];
+					}
+					var cipherBuffer = new Uint8Array(encryptedFileBuffer.length - nonceBuffer.length);
+					for (var i = 0; i < cipherBuffer.length; i++){
+						cipherBuffer[i] = encryptedFileBuffer[sodium.crypto_secretbox_NONCEBYTES + i];
+					}
+
+					//if (!k) k = sodium.crypto_generichash(sodium.crypto_secretbox_KEYBYTES, rootKey, from_hex(collectionDescription.salt));
+					if (!k) k = from_hex(collectionDescription.key);
+
+					var decryptedIndexStr = sodium.crypto_secretbox_open_easy(cipherBuffer, nonceBuffer, k, 'text');
+					if (!decryptedIndexStr){
+						console.error('Can\'t decrypt index file for collection ' + collectionName);
+						cb('INVALID_ROOTKEY');
+						return;
+					}
+
+					try {
+						serializedIndex = JSON.parse(decryptedIndexStr);
+					} catch (e){
+						cb('INVALID_INDEX');
+						return;
+					}
+
+					//Deserialize every object in the index.
+					var documentsIndex = {documents: {}, indexModel: serializedIndex.indexModel, docCount: serializedIndex.docCount, collectionSize: serializedIndex.collectionSize};
+
+					var docsIds = Object.keys(serializedIndex.documents);
+					for (var i = 0; i < docsIds.length; i++){
+						documentsIndex.documents[docsIds[i]] = clone(serializedIndex.documents[docsIds[i]]);
+						documentsIndex.documents[docsIds[i]].index = deserializeObject(documentsIndex.documents[docsIds[i]].index);
+					}
+
+					//Load tree
+					var collectionIndexSeed = PearsonSeedGenerator();
+					indexesSeeds._index = collectionIndexSeed;
+
+					collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, function(loadIndexErr){
+						if (err){
+							console.error('Migration error - cannot init the Index instance: ' + err);
+							cb(err);
+							return;
+						}
+
+						//Mass doc insert, with triggers
+						for (var i = 0; i < docsIds.length - 1; i++){
+							collectionIndex.add(docsIds[i], documentsIndex.documents[docsIds[i]], null, true);
+						}
+						//Inserting the last doc, and trigger the writes
+						collectionIndex.add(docsIds[docsIds.length - 1], documentsIndex.documents[docsIds[docsIds.length - 1]]);
+
+						collectionMeta = {
+							indexModel: documentsIndex.indexModel,
+							collectionBlobSize: documentsIndex.collectionSize,
+							indexesSeeds : indexesSeeds
+						};
+
+						saveMetaIndex(function(err){
+							if (err){
+								console.error('Migration error - cannot save collection meta data: ' + err);
+								cb(err);
+								return;
+							}
+
+							processInitParams();
+						});
+					});
+				});
+
+				/*fsExists(indexFilePath, function(indexExists){
 					if (indexExists){
 						function l(){ //Load existing index
-							fs.readFile(indexFilePath, function(err, data){
-								if (err){
-									console.error('Error while reading index file for collection ' + collectionName + ': ' + err);
-									cb(err);
-									return
-								}
 
-								//var encryptedFileBuffer = from_base64(data);
-								var encryptedFileBuffer = checkReadBuffer(data);
-								collectionIndexSize = data.length;
-								if (encryptedFileBuffer.length < minFileSize){
-									console.error('Error while reading index file for collection ' + collectionName + ': invalid file size');
-									cb('INVALID_INDEX');
-									return;
-								}
-
-								var nonceBuffer = new Uint8Array(sodium.crypto_secretbox_NONCEBYTES);
-								for (var i = 0; i < sodium.crypto_secretbox_NONCEBYTES; i++){
-									nonceBuffer[i] = encryptedFileBuffer[i];
-								}
-								var cipherBuffer = new Uint8Array(encryptedFileBuffer.length - nonceBuffer.length);
-								for (var i = 0; i < cipherBuffer.length; i++){
-									cipherBuffer[i] = encryptedFileBuffer[sodium.crypto_secretbox_NONCEBYTES + i];
-								}
-
-								//if (!k) k = sodium.crypto_generichash(sodium.crypto_secretbox_KEYBYTES, rootKey, from_hex(collectionDescription.salt));
-								if (!k) k = from_hex(collectionDescription.key);
-
-								var decryptedIndexStr = sodium.crypto_secretbox_open_easy(cipherBuffer, nonceBuffer, k, 'text');
-								if (!decryptedIndexStr){
-									console.error('Can\'t decrypt index file for collection ' + collectionName);
-									cb('INVALID_ROOTKEY');
-									return;
-								}
-
-								try {
-									serializedIndex = JSON.parse(decryptedIndexStr);
-								} catch (e){
-									cb('INVALID_INDEX');
-									return;
-								}
-
-								var migratingToV1_1 = false;
-
-								if (!serializedIndex.pearsonSeed && serializedIndex.documents){
-									console.log('Migrating DB format to v1.1');
-									migratingToV1_1 = true;
-
-									serializedIndex.seeds = indexesSeeds;
-									indexesSeeds._index = PearsonSeedGenerator();
-								} else {
-									//
-
-								}
-
-								//Deserialize every object in the index.
-								documentsIndex = {indexModel: serializedIndex.indexModel, docCount: serializedIndex.docCount, collectionSize: serializedIndex.collectionSize, pearsonSeed: serializedIndex.pearsonSeed};
-
-								if (migratingToV1_1){
-									var docsIds = Object.keys(serializedIndex.documents);
-									for (var i = 0; i < docsIds.length; i++){
-										documentsIndex.documents[docsIds[i]] = clone(serializedIndex.documents[docsIds[i]]);
-										documentsIndex.documents[docsIds[i]].index = deserializeObject(documentsIndex.documents[docsIds[i]].index);
-									}
-
-									//Insert in tree
-								} else {
-									//Load tree
-									collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, function(loadIndexErr){
-
-									});
-								}
-
-								//Checking that if an indexModel is provided as a parameter of this call, it hasn't changed with the one already saved on file.
-								if (indexModel && documentsIndex.indexModel){
-									if (!deepObjectEquality(documentsIndex.indexModel, indexModel)){
-										//If it does, update
-										console.log('Updating indexModel of collection ' + collectionName + ' to ' + JSON.stringify(indexModel));
-										documentsIndex.indexModel = indexModel;
-										serializedIndex.indexModel = indexModel;
-										collectionDescription.indexModel = indexModel;
-										saveRootIndex(function(err){ //Saving root Lawncipher index (updating collection description)
-											if (err){
-												cb(err);
-												return;
-											}
-											saveDocumentsIndex(function(err){ //Saving collection index, with updated indexModel attribute
-												if (err){
-													cb(err);
-													return;
-												}
-												endCollectionLoad();
-											});
-										});
-									} else {
-										//Else : provided indexModel is the same as is already used by collection (namely, indexModel ==== documentsIndex.indexModel). No change to be done
-										endCollectionLoad();
-									}
-								} else {
-									indexModel = documentsIndex.indexModel;
-									endCollectionLoad();
-								}
-
-								function endCollectionLoad(){
-									purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue)
-									cb(undefined, self);
-								}
-							});
 						}
 
 						setTimeout(l, 0);
@@ -970,7 +1065,7 @@
 
 						setTimeout(c, 0);
 					}
-				});
+				});*/
 			}
 
 			this.save = function(blob, index, cb, overwrite, ttl, doNotWriteIndex){
@@ -1065,7 +1160,8 @@
 							}
 
 						}
-						var uniqueId = docId && checkIdIsUnique(docId);
+
+						/*var uniqueId = docId && checkIdIsUnique(docId);
 						if (docId && !uniqueId){
 							if (overwrite){
 								removeDoc(docId, function(err){
@@ -1080,11 +1176,38 @@
 								cb('DUPLICATE_ID');
 								return;
 							}
-						}
+						}*/
 
-						//If there are `unique` fields or marked as `id`, then check for unicity before saving the doc
-						if ((docId && uniqueId) || uniqueFields.length > 0) checkFieldsUniticy();
-						else save(); //Otherwise, save the doc now
+						var uniqueId;
+						if (docId){
+							checkFieldIsUnique(function(err, isUnique){
+								if (err){
+									cb(err);
+									return;
+								}
+
+								uniqueId = isUnique;
+
+								if (docId && !uniqueId){
+									if (overwrite){
+										removeDoc(docId, function(err){
+											if (err){
+												cb(err);
+												return;
+											}
+
+											checkFieldsUniticy();
+										});
+									} else {
+										cb('DUPLICATE_ID');
+									}
+								}
+							});
+						} else {
+							//If there are `unique` fields or marked as `id`, then check for unicity before saving the doc
+							if ((docId && uniqueId) || uniqueFields.length > 0) checkFieldsUniticy();
+							else save(); //Otherwise, save the doc now
+						}
 
 						function checkFieldsUniticy(){
 							for (var i = 0; i < uniqueFields.length; i++){
@@ -1496,20 +1619,17 @@
 				documentsIndex.documents = null;
 			};
 
-			function saveDocumentsIndex(cb){
+			function saveMetaIndex(cb){
 				if (typeof cb != 'function') throw new TypeError('callback must be a function');
 
 				//if (!k) k = sodium.crypto_generichash(sodium.crypto_secretbox_KEYBYTES, rootKey, from_hex(collectionDescription.salt));
 				if (!k) k = from_hex(collectionDescription.key);
 
-				var docsIndexStr = JSON.stringify(serializedIndex);
-				var nonceBuffer = randomBuffer(sodium.crypto_secretbox_NONCEBYTES);
-				var docsIndexCipher = sodium.crypto_secretbox_easy(docsIndexStr, nonceBuffer, k);
-				var docsIndexFile = concatBuffers([nonceBuffer, docsIndexCipher]);
-				collectionIndexSize = docsIndexFile.length;
-				//var docsIndexFileStr = to_base64(docsIndexFile, true);
-				docsIndexFile = checkWriteBuffer(docsIndexFile);
-				fs.writeFile(indexFilePath, docsIndexFile, cb);
+				var metaIndexStr = JSON.stringify(collectionMeta);
+				var metaIndexCipher = scryptFileEncode(from_string(metaIndexStr), k);
+				metaIndexCipher = checkWriteBuffer(metaIndexCipher);
+
+				fs.writeFile(metaFilePath, metaIndexCipher, cb);
 			}
 
 			function getIndexFileName(r){
@@ -1720,34 +1840,39 @@
 			}
 
 			function removeDoc(id, cb, doNotSaveIndex){
-				if (!documentsIndex.documents[id]){
-					cb();
-					return;
-				}
+				collectionIndex.lookup(id, function(err, docToDelete){
+					if (err){
+						cb(err);
+						return;
+					}
 
-				if (!documentsIndex.documents[id].k){
-					//Docs that have a blob also have a k attribute, that holds the encryption key. If no k attribute can be found, then there is no blob association to the doc
-					removeFromIndex();
-				} else {
-					//Discounting the collection size from the blob to be deleted
-					var docFilePath = pathJoin([rootPath, collectionName, id]);
-					documentsIndex.collectionSize -= documentsIndex.documents[id].size;
-					serializedIndex.collectionSize = documentsIndex.collectionSize;
+					if (!docToDelete){
+						cb();
+						return;
+					}
 
-					fs.unlink(docFilePath, function(err){
-						if (err) cb(err);
-						else removeFromIndex();
-					});
-				}
+					if (docToDelete.k){
+						//Docs that have a blob also have a k attribute, that holds the encryption key.
+						//If no k attribute can be found, then there is no blob associated to the doc
+						var blobFilePath = pathJoin(collectionPath, id);
+						if (docToDelete.size) collectionMeta.collectionBlobSize -= docToDelete.size;
+
+						fs.unlink(blobFilePath, function(err){
+							if (err) cb(err);
+							else {
+								saveMetaIndex(function(err){
+									if (err) console.error('Cannot save _meta file for collection ' + collectionName + ': ' + err);
+									removeFromIndex();
+								});
+							}
+						})
+					} else {
+						removeFromIndex();
+					}
+				});
 
 				function removeFromIndex(){
-					delete documentsIndex.documents[id];
-					delete serializedIndex.documents[id];
-
-					documentsIndex.docCount--;
-					serializedIndex.docCount = documentsIndex.docCount;
-					if (doNotSaveIndex) cb();
-					else saveDocumentsIndex(cb);
+					collectionIndex.remove(id, undefined, cb, doNotSaveIndex); //doNotSaveIndex == noTrigger
 				}
 			}
 
@@ -1841,6 +1966,16 @@
 						do {
 							docId = docId || to_hex(randomBuffer(8));
 						} while (!checkIdIsUnique(docId));
+					}
+
+					if (!docId){
+						function tryId(){
+
+						}
+					}
+
+					function afterIdValidation(){
+
 					}
 
 					var updateOrOverwrite = false;
@@ -2017,15 +2152,26 @@
 			}
 
 			function checkIdIsUnique(id, cb){
-				if (!documentsIndex.documents[id]){
-					if (cb) cb(true);
-					return true;
-				}
-				if (cb) cb(false);
-				return false;
+				if (!cb) throw new Error('Missing callback');
+
+				collectionIndex.lookup(id, function(err, v){
+					cb(err, !!v);
+				});
 			}
 
 			function checkFieldIsUnique(fieldName, value, cb){
+				if (!cb) throw new TypeError('Missing callback');
+
+				var indexIterator = collectionIndex.iterator();
+
+				function iterateOne(){
+
+				}
+
+				function iterateNext(){
+
+				}
+
 				var docsList = Object.keys(documentsIndex.documents);
 				for (var i = 0; i < docsList.length; i++){
 					if (documentsIndex.documents[docsList[i]].index[fieldName] == value){
@@ -2864,30 +3010,98 @@
 			return new NodeIterator();
 		};
 
-		/*self.iterator = function(cb){
+		self.iterator = function(cb){
 			function KeyValueIterator(){
 
 				var thisIterator = this;
 
 				var nodeIterator = self.nodeIterator();
 				var currentNode;
-				var currentNodeSubcollection;
-				var currentNodeIteratedSet;
+				var currentNodeSubCollection;
+				var currentNodeSubCollectionKeysList;
 				var currentNodeIteratedIndex;
 
 				this.next = function(cb){
 					if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
+					if (!currentNode){
+						nodeIterator.next(function(err, nextNode){
+							if (err){
+								cb(err);
+								return;
+							}
 
+							currentNode = nextNode;
+							currentNodeSubCollection = currentNode.getBinnedRange().subCollection;
+							currentNodeSubCollectionKeysList = Object.keys(currentNodeSubCollection);
+							currentNodeIteratedIndex = 0;
+							nextKey();
+						});
+					} else {
+						nextKey();
+					}
+
+					function nextKey(){
+						var nextVal = currentNodeSubCollection[currentNodeSubCollectionKeysList[currentNodeIteratedIndex]];
+
+						currentNodeIteratedIndex++;
+						if (currentNodeIteratedIndex == currentNodeSubCollectionKeysList.length){
+							//End of this node's sub collection has been reach. On to the next node.
+							currentNode = undefined;
+						}
+
+						cb(undefined, nextVal);
+					}
 				};
 
 				this.hasNext = function(){
-					return nodeIterator.hasNext();
+					return nodeIterator.hasNext() || (currentNodeIteratedIndex < currentNodeSubCollectionKeysList.length - 1);
 				};
 			}
 
 			return new KeyValueIterator();
-		};*/
+		};
+
+		self.map = function(mapFn, cb){
+			if (typeof mapFn != 'function') throw new TypeError('mapFn must be a function');
+			if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+			var treeTraveler = self.nodeIterator();
+			var currentNode;
+
+			var resultSet = [];
+
+			function iterateNode(){
+				var currentSubCollection = currentNode.getBinnedRange('clone').subCollection;
+				var keysList = Object.keys(currentSubCollection);
+				for (var i = 0; i < keysList.length; i++){
+					mapFn(currentSubCollection[keysList[i]], emit);
+				}
+				nextNode();
+			}
+
+			function nextNode(){
+				if (treeTraveler.hasNext()){
+					treeTraveler.next(function(err, _n){
+						if (err){
+							cb(err);
+							return;
+						}
+
+						currentNode = _n;
+						iterateNode();
+					});
+				} else {
+					cb(undefined, resultSet);
+				}
+			}
+
+			function emit(d){
+				resultSet.push(d);
+			}
+
+			nextNode();
+		};
 
 		function loadIndexFragmentForHash(h, _cb){
 			var rangeOfHash = findRangeOfHash(h);
@@ -3329,9 +3543,10 @@
 						currentNode = rightNode;
 					} else {
 						//Handles the case that insertRange is not an evenly cut range
+						console.log('NOT EVENLY CUT!');
 						if (!(insertRange.isContainedIn(nextRanges[0]) || insertRange.isContainedIn(nextRanges[1]))){
 							isHolderOfRange = true;
-							currentNode.mergeSubCollection(subCollection, !disallowKeyCollisions)
+							currentNode.mergeSubCollection(subCollection, !disallowKeyCollisions);
 							receiverNode = currentNode;
 						} else {
 							console.error('CRITICAL INTERNAL ERROR : your ranges are messed up')
@@ -3658,8 +3873,8 @@
 			* @param {Long} hash
 			*/
 			thisNode.lookup = function(key, hash){
-				if (thisNode.isLeaf()){
-					return subCollection[key];
+				if (this.isLeaf()){
+					return subCollection[key] && clone(subCollection[key]);
 				} else {
 					if (hash.lte(middlePoint)){
 						return left.lookup(key, hash);
@@ -3740,9 +3955,16 @@
 			/**
 			* @returns {Object} - {start, end, subCollection}
 			*/
-			thisNode.getBinnedRange = function(){
+			thisNode.getBinnedRange = function(copyType){
 				if (isLeaf()){
-					var resultObject = {range: dataRange, subCollection: shallowCopy(subCollection)};
+					var resultObject = {range: dataRange};
+					if (!copyType || copyType == 'shallow'){
+						resultObject.subCollection = shallowCopy(subCollection);
+					} else if (copyType == 'clone'){
+						resultObject.subCollection = clone(subCollection);
+					} else if (copyType == 'none'){
+						resultObject.subCollection = subCollection;
+					}
 					return resultObject;
 				}/* else {
 					throw 'Incomplete';
