@@ -208,7 +208,7 @@ function loadTests(docCount, cb, usingNoTrigger){
 
 		function removeOne(){
 			var currentTuple = dataSet[removeIndex];
-			testIndex.remove(currentTuple.k, currentTuple.v, function(err){
+			testIndex.remove(currentTuple.k, undefined, function(err){
 				if (err) throw err;
 
 				nextRemoval();
