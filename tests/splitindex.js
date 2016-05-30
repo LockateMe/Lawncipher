@@ -347,10 +347,10 @@ basicTests(function(){
 
 				console.log('');
 				console.log('----------------------');
-				console.log('Mega load index testing (1M docs)');
+				console.log('Mega load index testing (500k docs)');
 				console.log('----------------------');
 				var st4 = clock();
-				loadTests(1000000, function(){
+				loadTests(500000, function(){
 					var duration = clock(st4);
 					console.log('done in ' + duration.toString() + 'ms');
 				}, true);
