@@ -272,11 +272,11 @@
 				message: 'Listing (one) collections',
 				result: ['test_nomodel_collection']
 			},
-			{
+			/*{
 				message: 'Counting items (without query)',
 				collectionName: 'test_nomodel_collection',
 				result: 0
-			},
+			},*/
 			{
 				message: 'Saving a blob',
 				blob: 'Hello world',
@@ -367,10 +367,10 @@
 				query: {'$not': {identifier: 'doc2'}},
 				result: 3
 			},
-			{
+			/*{
 				message: 'Getting the size of the collection',
 				collectionName: 'test_nomodel_collection'
-			},
+			},*/
 			{
 				message: 'Looking for the blob (with `find`)',
 				collectionName: 'test_nomodel_collection',
@@ -687,7 +687,7 @@
 			test_save, //Saving a blob
 			//test_count,
 			test_save, //Saving an index doc
-			test_count,
+			//test_count,
 			test_save, //Saving an index doc
 			test_save, //Saving an index doc
 			test_save, //Saving an index doc
@@ -702,7 +702,7 @@
 			test_open,
 			test_collection,
 			test_count,
-			test_size,
+			//test_size,
 			test_find,
 			test_findOne,
 			test_find,
@@ -876,6 +876,7 @@
 					next(err);
 					return;
 				}
+				if (!id) throw new Error('id cannot be undefined!');
 				console.log('New docId: ' + id);
 				if (!docs[collectionName]) docs[collectionName] = [id];
 				else docs[collectionName].push(id);
@@ -1002,9 +1003,12 @@
 			var _params = getParams();
 			var collectionName = _params.collectionName
 			var q = _params.query || docs[collectionName][_params.docIndex];
-			var ttls = collections[collectionName].getTTL(q);
-			console.log('Currently set TTLs matching ' + JSON.stringify(q) + ': ' + JSON.stringify(ttls));
-			next();
+			collections[collectionName].getTTL(q, function(err, ttls){
+				if (err) throw err;
+
+				console.log('Currently set TTLs matching ' + JSON.stringify(q) + ': ' + JSON.stringify(ttls));
+				next();
+			});
 		}
 
 		function test_setTTL(next){
