@@ -796,9 +796,7 @@
 			var legacy_indexFilePath = pathJoin(collectionPath, '_index'); //Index file of the collection
 
 			var collectionMeta = null; // An object, containing the settings/meta-data of the collection (PearsonSeed, IndexModel,...). Sourced from the _meta file
-			var collectionTTLs = null;
-			//var documentsIndex = null; //Decrypted, parsed and deserialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
-			//var serializedIndex = null; //Decrypted, parsed and serialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
+			var collectionTTLs = null, collectionTTLsChanged = false;
 
 			var collectionIndex; // The index instance, containing the <docId, doc> pairs
 			var indexesSeeds = {};
@@ -1194,6 +1192,8 @@
 									} else {
 										cb('DUPLICATE_ID');
 									}
+								} else {
+									save();
 								}
 							});
 						} else {
@@ -1203,13 +1203,6 @@
 						}
 
 						function checkFieldsUniticy(){
-							for (var i = 0; i < uniqueFields.length; i++){
-								if (!checkFieldIsUnique(uniqueFields[i], indexData[uniqueFields[i]])){
-									cb('DUPLICATE_UNIQUE_VALUE');
-									return;
-								}
-							}
-
 							var fieldIndex = 0;
 
 							function checkOneField(){
@@ -1223,7 +1216,7 @@
 										return;
 									}
 									nextField();
-								})
+								});
 							}
 
 							function nextField(){
@@ -1231,6 +1224,8 @@
 								if (uniqueFields.length == fieldIndex) save();
 								else checkOneField();
 							}
+
+							checkOneField();
 						}
 					} else {
 						//No validation to be done
@@ -1434,14 +1429,35 @@
 										return;
 									}
 
-									for (var i = 0; i < uniqueFields.length; i++){
-										if (!checkFieldIsUnique(uniqueFields[i], newIndexData[uniqueFields[i]])){
-											next('DUPLICATE_UNIQUE_VALUE');
-											return;
-										}
+									//Checking fields unicity
+									var fieldUnicityIndex = 0;
+
+									function checkOneField(){
+										checkFieldIsUnique(uniqueFields[fieldUnicityIndex], function(err, isUnique){
+											if (err){
+												next(err);
+												return;
+											}
+											if (!isUnique){
+												next('DUPLICATE_UNIQUE_VALUE');
+												return;
+											}
+											nextField();
+										});
 									}
+
+									function nextField(){
+										fieldUnicityIndex++;
+										if (uniqueFields.length == fieldUnicityIndex) save();
+										else checkOneField();
+									}
+
+									checkOneField();
+								} else save();
+
+								function save(){
+									saveDoc(docId, blobData, newIndexData, 'json', collectionTTLs && collectionTTLs[docId], next)
 								}
-								saveDoc(docId, blobData, newIndexData, 'json', currentDoc.ttl, next);
 							}
 						}
 					}
@@ -1662,23 +1678,6 @@
 				fs.writeFile(metaFilePath, metaIndexCipher, cb);
 			}
 
-			function saveTTLs(cb){
-				if (typeof cb != 'function') throw new TypeError('callback must be a function');
-
-				if (!collectionTTLs){
-					cb();
-					return;
-				}
-
-				if (!k) k = from_hex(collectionDescription.key);
-
-				var ttlsStr = JSON.stringify(collectionTTLs);
-				var ttlsCipher = scryptFileEncode(from_string(ttlsStr), k);
-				ttlsCipher = checkWriteBuffer(ttlsCipher);
-
-				fs.writeFile(ttlsFilePath, ttlsCipher, cb);
-			}
-
 			function getIndexFileName(r){
 				return '_index_' + to_hex(longToBufferBE(r.start)) + '_' + to_hex(longToBufferBE(r.end));
 			}
@@ -1695,13 +1694,13 @@
 				}
 
 				var resultSet = [];
-				var resultSetRemainder = limit;
+				//var resultSetRemainder = limit;
 
 				function mapFn(subset, countResult){
-					var partialResult = applyQuery(query, subset, resultSetRemainder, matchFunction, includePureBlobs);
+					var partialResult = applyQuery(query, subset, undefined, matchFunction, includePureBlobs);
 					Array.prototype.push.apply(resultSet, partialResult);
 
-					if (limit) resultSetRemainder -= partialResult.length;
+					//if (limit) resultSetRemainder -= partialResult.length;
 				}
 
 				collectionIndex.map(mapFn, function(err){
@@ -2154,38 +2153,14 @@
 
 				//This code segment is to be executed typically when loading the collection
 				if (!collectionTTLs){
-					fsExists(ttlsFilePath, function(ttlsExist){
-						if (!ttlsExist){
-							collectionTTLs = -1;
+					loadTTLs(function(err){
+						if (err){
 							if (cb) cb();
+							else throw err;
 							return;
-						} else {
-							fs.readFile(ttlsFilePath, function(err, data){
-								if (err){
-									if (cb) cb(err);
-									return;
-								}
-
-								var ttlsCipher = checkReadBuffer(data);
-								var ttlsBuffer;
-								try {
-									ttlsBuffer = scryptFileDecode(ttlsCipher, k);
-								} catch (e){
-									console.error('Cannot decrypt TTLs list for collection ' + collectionName + ': ' + err);
-									if (cb) cb('INVALID_ROOTKEY');
-									return;
-								}
-
-								try {
-									collectionTTLs = JSON.parse(to_string(ttlsBuffer));
-								} catch (e){
-									if (cb) cb('INVALID_TTLS');
-									return;
-								}
-
-								runPurge();
-							});
 						}
+
+						runPurge();
 					});
 				} else runPurge();
 
@@ -2217,10 +2192,18 @@
 								else console.error('Error while trying to delete the expired doc ' + currentDocId + ' from collection ' + collectionName + ': ' + err);
 								return;
 							}
+
+							delete collectionTTLs[currentDocId];
+
 							docIndex++;
 							if (docIndex == docsToDelete.length){
+								collectionTTLsChanged = false;
 								purgeOngoing = false;
-								if (cb) cb();
+
+								saveTTLs(function(err){
+									if (err && !cb) throw err;
+									if (cb) cb(err);
+								});
 							} else {
 								//Chain doc deletions
 								if (docIndex % 100 == 0) setTimeout(deleteOne, 0);
@@ -2230,6 +2213,16 @@
 					}
 
 					if (docsToDelete) deleteOne();
+					else if (collectionTTLsChanged){
+						saveTTLs(function(err){
+							collectionTTLsChanged = false;
+							purgeOngoing = false;
+
+							if (err && !cb) throw err;
+							if (cb) cb();
+						});
+
+					}
 					else {
 						purgeOngoing = false;
 						if (cb) cb();
@@ -2239,43 +2232,113 @@
 
 			function setTTLForId(id, ttl, cb){
 				if (!collectionTTLs){ //Waiting for the purging system to load the TTLs file
-					setTimeout(function(){
-						setTTLForId(id, ttl, cb);
-					}, purgeIntervalValue);
-					return;
-				}
+					loadTTLs(function(err){
+						if (err){
+							if (cb) cb(err);
+							else throw err;
+							return;
+						}
 
-				if (collectionTTLs == -1){
-					collectionTTLs = {};
-				}
+						performSet();
+					});
+				} else performSet();
 
-				if (Array.isArray(id)){
-					for (var i = 0; i < id.length; i++){
-						collectionTTLs[id[i]] = ttl;
+				function performSet(){
+					if (collectionTTLs == -1){
+						collectionTTLs = {};
 					}
-				} else collectionTTLs[id] = ttl;
 
-				saveTTLs(cb);
+					if (Array.isArray(id)){
+						for (var i = 0; i < id.length; i++){
+							collectionTTLs[id[i]] = ttl;
+						}
+					} else collectionTTLs[id] = ttl;
+
+					collectionTTLsChanged = true;
+
+					if (cb) cb();
+				}
 			}
 
 			function getTTLForId(id, cb){
 				if (!collectionTTLs){ //Waiting for the purging system to load the TTLs file
-					setTimeout(function(){
-						getTTLForId(id, cb);
-					}, purgeIntervalValue);
+					loadTTLs(function(err){
+						if (err){
+							cb(err);
+							return;
+						}
+
+						performGet();
+					});
+				} else performGet();
+
+				function performGet(){
+					if (collectionTTLs == -1) cb();
+					else {
+						if (Array.isArray(id)){
+							var r = {};
+							for (var i = 0; i < id.length; i++){
+								r[id[i]] = collectionTTLs[id[i]];
+							}
+							cb(r);
+						} else cb(collectionTTLs[id]);
+					}
+				}
+			}
+
+			function saveTTLs(cb){
+				if (typeof cb != 'function') throw new TypeError('callback must be a function');
+
+				if (!collectionTTLs){
+					cb();
 					return;
 				}
 
-				if (collectionTTLs == -1) cb();
-				else {
-					if (Array.isArray(id)){
-						var r = {};
-						for (var i = 0; i < id.length; i++){
-							r[id[i]] = collectionTTLs[id[i]];
-						}
-						cb(r);
-					} else cb(collectionTTLs[id]);
-				}
+				if (!k) k = from_hex(collectionDescription.key);
+
+				var ttlsStr = JSON.stringify(collectionTTLs);
+				var ttlsCipher = scryptFileEncode(from_string(ttlsStr), k);
+				ttlsCipher = checkWriteBuffer(ttlsCipher);
+
+				fs.writeFile(ttlsFilePath, ttlsCipher, cb);
+			}
+
+			function loadTTLs(cb){
+				if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+				fsExists(ttlsFilePath, function(ttlsExist){
+					if (!ttlsExist){
+						collectionTTLs = -1;
+						cb();
+						return;
+					} else {
+						fs.readFile(ttlsFilePath, function(err, data){
+							if (err){
+								cb(err);
+								return;
+							}
+
+							var ttlsCipher = checkReadBuffer(data);
+							var ttlsBuffer;
+							try {
+								ttlsBuffer = scryptFileDecode(ttlsCipher, k);
+							} catch (e){
+								console.error('Cannot decrypt TTLs list for collection ' + collectionName + ': ' + err);
+								cb('INVALID_ROOTKEY');
+								return;
+							}
+
+							try {
+								collectionTTLs = JSON.parse(to_string(ttlsBuffer));
+							} catch (e){
+								cb('INVALID_TTLS');
+								return;
+							}
+
+							cb();
+						});
+					}
+				});
 			}
 
 			function checkIdIsUnique(id, cb){
