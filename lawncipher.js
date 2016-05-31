@@ -791,10 +791,12 @@
 
 			var collectionDescription; //The object to be added to the collection list, describing the current collection
 			var collectionPath = pathJoin(rootPath, collectionName); //Root directory of the collection
-			var metaFilePath = path(collectionPath, '_meta');
+			var metaFilePath = pathJoin(collectionPath, '_meta');
+			var ttlsFilePath = pathJoin(collectionPath, '_ttls');
 			var legacy_indexFilePath = pathJoin(collectionPath, '_index'); //Index file of the collection
 
 			var collectionMeta = null; // An object, containing the settings/meta-data of the collection (PearsonSeed, IndexModel,...). Sourced from the _meta file
+			var collectionTTLs = null;
 			//var documentsIndex = null; //Decrypted, parsed and deserialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
 			//var serializedIndex = null; //Decrypted, parsed and serialized contents of the index file. Object joining indexModel, documents, docCount & collectionSize
 
@@ -896,8 +898,16 @@
 										return;
 									}
 
-									purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue);
-									cb(undefined, self);
+									collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, function(loadIndexErr){
+										if (err){
+											console.error('Load error - cannot inint the collection index: ' + err);
+											cb(err);
+											return;
+										}
+
+										purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue);
+										cb(undefined, self);
+									});
 								});
 							});
 						});
@@ -1161,26 +1171,9 @@
 
 						}
 
-						/*var uniqueId = docId && checkIdIsUnique(docId);
-						if (docId && !uniqueId){
-							if (overwrite){
-								removeDoc(docId, function(err){
-									if (err){
-										cb(err);
-										return;
-									}
-									checkFieldsUniticy();
-								});
-								return;
-							} else {
-								cb('DUPLICATE_ID');
-								return;
-							}
-						}*/
-
 						var uniqueId;
 						if (docId){
-							checkFieldIsUnique(function(err, isUnique){
+							checkIdIsUnique(docId, function(err, isUnique){
 								if (err){
 									cb(err);
 									return;
@@ -1216,7 +1209,28 @@
 									return;
 								}
 							}
-							save();
+
+							var fieldIndex = 0;
+
+							function checkOneField(){
+								checkFieldIsUnique(uniqueFields[fieldIndex], function(err, isUnique){
+									if (err){
+										cb(err);
+										return;
+									}
+									if (!isUnique){
+										cb('DUPLICATE_UNIQUE_VALUE');
+										return;
+									}
+									nextField();
+								})
+							}
+
+							function nextField(){
+								fieldIndex++;
+								if (uniqueFields.length == fieldIndex) save();
+								else checkOneField();
+							}
 						}
 					} else {
 						//No validation to be done
@@ -1334,113 +1348,118 @@
 					return;
 				}
 
-				var matchedDocs = applyQuery(q, documentsIndex.documents);
-
-				if (matchedDocs.length == 0){ //No docs to be updated
-					callback(undefined, 0);
-					return;
-				}
-
-				var indexModel = documentsIndex.indexModel;
-				var docIndex = 0;
-
-				processOne();
-
-				function processOne(){
-					var currentDoc = matchedDocs[docIndex];
-					var docId = currentDoc.id;
-					var indexData = currentDoc.index;
-					if (typeof newData == 'string'){
-						saveDoc(docId, newData, indexData, 'string', currentDoc.ttl, next);
-					} else if (newData instanceof Uint8Array){
-						saveDoc(docId, newData, indexData, 'buffer', currentDoc.ttl, next);
-					} else { //JSON object
-						var blobData;
-
-						if (currentDoc.k && currentDoc.blobType){ //If there is a blob
-							//Read it. Regardless of it's type, you'll need it later
-							readDoc(currentDoc, function(err, blobResult){
-								if (err){
-									next(err);
-									return;
-								}
-
-								if (!indexOnly){
-									if (currentDoc.blobType == 'json'){ //The blob is JSON
-										//read the blob, update upon it, then save
-										var newDataAttributes = Object.keys(newData);
-										for (var i = 0; i < newDataAttributes.length; i++){
-											blobResult[newDataAttributes[i]] = newData[newDataAttributes[i]];
-										}
-										blobData = JSON.stringify(blobResult);
-									} else { //The current blob is not JSON
-										blobData = newData;
-										//save the doc, overwriting blob
-									}
-								}
-								updateIndex();
-							});
-						} else updateIndex(); //Saving the doc, adding the blob
-
-						function updateIndex(){
-							var newDataAttributes = Object.keys(newData);
-							var newIndexData = clone(indexData);
-							for (var i = 0; i < newDataAttributes.length; i++){
-								newIndexData[newDataAttributes[i]] = newData[newDataAttributes[i]];
-							}
-
-							//If there is a model, validate against it
-							if (indexModel){
-								var validatedIndexData = validateIndexAgainstModel(newIndexData, indexModel);
-								if (typeof validatedIndexData == 'string' || !validatedIndexData){
-									next('INVALID_INDEX_DATA');
-									return;
-								}
-								newIndexData = validatedIndexData;
-
-								//Extracted supposed id and unique fields
-								var indexFields = Object.keys(indexModel);
-								var idField = null, uniqueFields = [];
-								for (var i = 0; i < indexFields.length; i++){
-									if (indexModel[indexFields[i]].id){
-										if (!idField) idField = indexFields[i];
-									}
-									if (indexModel[indexFields[i]].unique){
-										uniqueFields.push(indexFields[i]);
-									}
-								}
-
-								//Check that the id didn't change with the new data
-								if (idField && newIndexData[idField] != indexData[idField]){
-									next('ID_CHANGE_FORBIDDEN');
-									return;
-								}
-
-								for (var i = 0; i < uniqueFields.length; i++){
-									if (!checkFieldIsUnique(uniqueFields[i], newIndexData[uniqueFields[i]])){
-										next('DUPLICATE_UNIQUE_VALUE');
-										return;
-									}
-								}
-							}
-							saveDoc(docId, blobData, newIndexData, 'json', currentDoc.ttl, next);
-						}
-					}
-				}
-
-				function next(err){
+				retrieveIndexDocsMatchingQuery(q, undefined, undefined, undefined, function(err, matchedDocs){
 					if (err){
-						callback(err, docIndex);
+						callback(err);
 						return;
 					}
-					docIndex++;
-					if (docIndex == matchedDocs.length){
-						callback(undefined, matchedDocs.length);
-					} else {
-						if (docIndex % 100 == 0) setTimeout(processOne, 0);
-						else processOne();
+
+					if (matchedDocs.length == 0){ //No docs to be updated
+						callback(undefined, 0);
+						return;
 					}
-				}
+
+					var indexModel = collectionMeta.indexModel;
+					var docIndex = 0;
+
+					processOne();
+
+					function processOne(){
+						var currentDoc = matchedDocs[docIndex];
+						var docId = currentDoc.id;
+						var indexData = currentDoc.index;
+						if (typeof newData == 'string'){
+							saveDoc(docId, newData, indexData, 'string', currentDoc.ttl, next);
+						} else if (newData instanceof Uint8Array){
+							saveDoc(docId, newData, indexData, 'buffer', currentDoc.ttl, next);
+						} else { //JSON object
+							var blobData;
+
+							if (currentDoc.k && currentDoc.blobType){ //If there is a blob
+								//Read it. Regardless of it's type, you'll need it later
+								readDoc(currentDoc, function(err, blobResult){
+									if (err){
+										next(err);
+										return;
+									}
+
+									if (!indexOnly){
+										if (currentDoc.blobType == 'json'){ //The blob is JSON
+											//read the blob, update upon it, then save
+											var newDataAttributes = Object.keys(newData);
+											for (var i = 0; i < newDataAttributes.length; i++){
+												blobResult[newDataAttributes[i]] = newData[newDataAttributes[i]];
+											}
+											blobData = JSON.stringify(blobResult);
+										} else { //The current blob is not JSON
+											blobData = newData;
+											//save the doc, overwriting blob
+										}
+									}
+									updateIndex();
+								});
+							} else updateIndex(); //Saving the doc, adding the blob
+
+							function updateIndex(){
+								var newDataAttributes = Object.keys(newData);
+								var newIndexData = clone(indexData);
+								for (var i = 0; i < newDataAttributes.length; i++){
+									newIndexData[newDataAttributes[i]] = newData[newDataAttributes[i]];
+								}
+
+								//If there is a model, validate against it
+								if (indexModel){
+									var validatedIndexData = validateIndexAgainstModel(newIndexData, indexModel);
+									if (typeof validatedIndexData == 'string' || !validatedIndexData){
+										next('INVALID_INDEX_DATA');
+										return;
+									}
+									newIndexData = validatedIndexData;
+
+									//Extracted supposed id and unique fields
+									var indexFields = Object.keys(indexModel);
+									var idField = null, uniqueFields = [];
+									for (var i = 0; i < indexFields.length; i++){
+										if (indexModel[indexFields[i]].id){
+											if (!idField) idField = indexFields[i];
+										}
+										if (indexModel[indexFields[i]].unique){
+											uniqueFields.push(indexFields[i]);
+										}
+									}
+
+									//Check that the id didn't change with the new data
+									if (idField && newIndexData[idField] != indexData[idField]){
+										next('ID_CHANGE_FORBIDDEN');
+										return;
+									}
+
+									for (var i = 0; i < uniqueFields.length; i++){
+										if (!checkFieldIsUnique(uniqueFields[i], newIndexData[uniqueFields[i]])){
+											next('DUPLICATE_UNIQUE_VALUE');
+											return;
+										}
+									}
+								}
+								saveDoc(docId, blobData, newIndexData, 'json', currentDoc.ttl, next);
+							}
+						}
+					}
+
+					function next(err){
+						if (err){
+							callback(err, docIndex);
+							return;
+						}
+						docIndex++;
+						if (docIndex == matchedDocs.length){
+							callback(undefined, matchedDocs.length);
+						} else {
+							if (docIndex % 100 == 0) setTimeout(processOne, 0);
+							else processOne();
+						}
+					}
+				});
 			};
 
 			this.find = function(q, cb, limit){
@@ -1454,45 +1473,51 @@
 					return;
 				}
 				//If not blob, just return index data
-				var results = applyQuery(q, documentsIndex.documents, limit);
-				//No results found. Return an empty array right away.
-				if (results.length == 0){
-					cb(undefined, []);
-					return;
-				}
-
-				var resultData = new Array(results.length);
-				var endCount = 0;
-				var _err;
-				var cbCalled = false;
-
-				for (var i = 0; i < results.length; i++){
-					processResult(results[i], i);
-				}
-
-				//Trying to batch async calls. Is this going to be a bottleneck when scaling result set size
-				function processResult(r, i){
-					readDoc(r, function(err, doc){
-						if (err){
-							_err = err;
-							return;
-						}
-						resultData[i] = doc;
-						end();
-					});
-				}
-
-				function end(){
-					endCount++;
-
-					if (cbCalled) return; //Really weird race condition cases
-
-					if (endCount == results.length){
-						if (_err) cb(err);
-						else cb(undefined, resultData);
-						cbCalled = true;
+				retrieveIndexDocsMatchingQuery(q, limit, undefined, undefined, function(err, results){
+					if (err){
+						cb(err);
+						return;
 					}
-				}
+
+					//No results found. Return an empty array right away.
+					if (results.length == 0){
+						cb(undefined, []);
+						return;
+					}
+
+					var resultData = new Array(results.length);
+					var endCount = 0;
+					var _err;
+					var cbCalled = false;
+
+					for (var i = 0; i < results.length; i++){
+						processResult(results[i], i);
+					}
+
+					//Trying to batch async calls. Is this going to be a bottleneck when scaling result set size
+					function processResult(r, i){
+						readDoc(r, function(err, doc){
+							if (err){
+								_err = err;
+								return;
+							}
+							resultData[i] = doc;
+							end();
+						});
+					}
+
+					function end(){
+						endCount++;
+
+						if (cbCalled) return; //Really weird race condition cases
+
+						if (endCount == results.length){
+							if (_err) cb(err);
+							else cb(undefined, resultData);
+							cbCalled = true;
+						}
+					}
+				});
 			};
 
 			this.findOne = function(q, cb){
@@ -1513,69 +1538,82 @@
 
 				if (!(typeof limit == 'undefined' || limit == null) && !(typeof limit == 'number' && Math.floor(limit) == limit && limit > 0)) cb(new TypeError('when defined, limit must be a strictly positive integer'));
 
-				var results = applyQuery(q, documentsIndex.documents, limit);
+				retrieveIndexDocsMatchingQuery(q, limit, undefined, undefined, function(err, results){
+					if (err){
+						cb(err);
+						return;
+					}
 
-				if (results.length == 0){
-					cb(undefined, 0);
-					return;
-				}
+					if (results.length == 0){
+						cb(undefined, 0);
+						return;
+					}
 
-				//Sync-like deletion
-				var docIndex = 0;
+					//Sync-like deletion
+					var docIndex = 0;
 
-				function removeOne(){
-					removeDoc(results[docIndex].id, function(err){
-						if (err){
-							cb(err, docIndex); //Return the number of deleted docs until now
-							return;
-						}
-						docIndex++;
-						if (docIndex == results.length) cb(undefined, results.length);
-						else {
-							if (docIndex % 100 == 0) setTimeout(removeOne, 0); //Limit call stack size
-							else removeOne();
-						}
-					});
-				}
+					function removeOne(){
+						removeDoc(results[docIndex].id, function(err){
+							if (err){
+								cb(err, docIndex); //Return the number of deleted docs until now
+								return;
+							}
+							docIndex++;
+							if (docIndex == results.length) cb(undefined, results.length);
+							else {
+								if (docIndex % 100 == 0) setTimeout(removeOne, 0); //Limit call stack size
+								else removeOne();
+							}
+						});
+					}
 
-				removeOne();
+					removeOne();
+				});
 			};
 
-			this.count = function(q){
-				if (q){
+			this.count = function(q, cb){
+				if (!q) throw new TypeError('count query is missing');
+				if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+				retrieveIndexDocsMatchingQuery(q, undefined, undefined, undefined, function(err, results){
+					cb(err, results.length);
+				});
+
+				/*if (q){
 					if (typeof q == 'string') return documentsIndex.documents[q] ? 1 : 0;
 					if (typeof q != 'object') throw new TypeError('when defined, q must either be a string or an object');
 					var results = applyQuery(q, documentsIndex.documents);
 					return results.length;
-				} else return documentsIndex.docCount;
+				} else return documentsIndex.docCount;*/
 			};
 
-			this.size = function(cb){
+			/*this.size = function(cb){
 				if (cb && typeof cb != 'function') throw new TypeError('when defined, callback must be a function');
 
 				var currentCollectionSize = collectionIndexSize + documentsIndex.collectionSize;
 				if (cb) cb(undefined, currentCollectionSize);
 				else return currentCollectionSize;
-			};
+			};*/
 
 			this.getTTL = function(q, cb){
 				if (!(typeof q == 'string' || typeof q == 'object')) throw new TypeError('q must either be a string or an object');
-				if (cb && typeof cb != 'function') throw new TypeError('cb must be a function');
+				if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
-				var results = applyQuery(q, documentsIndex.documents);
+				retrieveIndexDocsMatchingQuery(q, undefined, undefined, undefined, function(err, results){
+					if (err){
+						cb(err);
+						return;
+					}
 
-				if (results.length == 0){ //If no matched documents, just pass the empty array "to prove it"
-					if (cb) cb(results);
-					else return results;
-				}
+					if (results.length == 0){ //If no matched documents, just pass the empty array "to prove it"
+						if (cb) cb(undefined, results);
+						else return results;
+					}
 
-				var ttlResults = {};
-				for (var i = 0; i < results.length; i++){
-					ttlResults[results[i].id] = results[i].ttl;
-				}
-
-				if (cb) cb(ttlResults);
-				else return ttlResults;
+					getTTLForId(results.map(function(d){return d.id}), function(ttls){
+						cb(undefined, ttls);
+					});
+				});
 			};
 
 			this.setTTL = function(q, ttl, cb){
@@ -1585,29 +1623,22 @@
 				if (ttl instanceof Date) ttl = ttl.getTime();
 				if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
-				var ttlDocs = applyQuery(q, documentsIndex.documents);
+				retrieveIndexDocsMatchingQuery(q, undefined, undefined, undefined, function(err, ttlDocs){
+					if (err){
+						cb(err);
+						return;
+					}
 
-				if (ttlDocs.length == 0){ //No docs mathed by the query, so no TTL to set/update
-					cb();
-					return;
-				}
 
-				if (ttl > 0 && ttl < Date.now()) ttl = ttl + Date.now();
+					if (!ttlDocs || ttlDocs.length == 0){ //No docs mathed by the query, so no TTL to set/update
+						cb();
+						return;
+					}
 
-				for (var i = 0; i < ttlDocs.length; i++){
-					if (ttl <= 0 || ttl == null || typeof ttl == 'undefined'){
-						if (ttlDocs[i].ttl) delete ttlDocs[i].ttl; //Delete ttl value
-					} else ttlDocs[i].ttl = ttl; //Setting/updating ttl value
+					if (ttl > 0 && ttl < Date.now()) ttl = ttl + Date.now();
 
-					var currentDocId = ttlDocs[i].id;
-					documentsIndex.documents[currentDocId] = ttlDocs[i]; //Set the resulting modified doc in documentsIndex
-					delete documentsIndex.documents[currentDocId].id; //Removing the injected identifier
-					serializedIndex.documents[currentDocId] = documentsIndex.documents[currentDocId]; //Replacing the corresponding document in serializedIndex by the resulting object
-					serializedIndex.documents[currentDocId].index = serializeObject(serializedIndex.documents[currentDocId].index); //Re-serializing the resulting object
-				}
-
-				//Save the resulting collection index to persistent memory
-				saveDocumentsIndex(cb);
+					setTTLForId(ttlDocs.map(function(d){return d.id}), ttl, cb);
+				});
 			};
 
 			this.close = function(){
@@ -1616,7 +1647,6 @@
 					purgeInterval = null;
 				}
 				k = null;
-				documentsIndex.documents = null;
 			};
 
 			function saveMetaIndex(cb){
@@ -1632,8 +1662,56 @@
 				fs.writeFile(metaFilePath, metaIndexCipher, cb);
 			}
 
+			function saveTTLs(cb){
+				if (typeof cb != 'function') throw new TypeError('callback must be a function');
+
+				if (!collectionTTLs){
+					cb();
+					return;
+				}
+
+				if (!k) k = from_hex(collectionDescription.key);
+
+				var ttlsStr = JSON.stringify(collectionTTLs);
+				var ttlsCipher = scryptFileEncode(from_string(ttlsStr), k);
+				ttlsCipher = checkWriteBuffer(ttlsCipher);
+
+				fs.writeFile(ttlsFilePath, ttlsCipher, cb);
+			}
+
 			function getIndexFileName(r){
 				return '_index_' + to_hex(longToBufferBE(r.start)) + '_' + to_hex(longToBufferBE(r.end));
+			}
+
+			function retrieveIndexDocsMatchingQuery(query, limit, matchFunction, includePureBlobs, cb){
+
+				//Ignore sorting, as this will be done by the function calling this one (i.e : find or findOne)
+				query = query && shallowCopy(query);
+				var sortQuery;
+				if (query && (query.$sort || query.$skip)){
+					sortQuery = {$sort: query.$sort, $skip: query.$skip};
+					delete query.$sort;
+					delete query.$skip;
+				}
+
+				var resultSet = [];
+				var resultSetRemainder = limit;
+
+				function mapFn(subset, countResult){
+					var partialResult = applyQuery(query, subset, resultSetRemainder, matchFunction, includePureBlobs);
+					Array.prototype.push.apply(resultSet, partialResult);
+
+					if (limit) resultSetRemainder -= partialResult.length;
+				}
+
+				collectionIndex.map(mapFn, function(err){
+					if (err){
+						cb(err);
+						return;
+					}
+
+					cb(undefined, sortQuery ? applyQuery(sortQuery, resultSet, limit, includePureBlobs) : resultSet);
+				}, limit, true);
 			}
 
 			function applyQuery(query, dataset, limit, matchFunction, includePureBlobs){
@@ -1878,14 +1956,14 @@
 
 			function saveDoc(docId, fileData, indexData, blobType, ttl, cb, doNotWriteIndex){
 				var docIndexObj;
-				saveIndex(function(err){
+				prepareIndex(function(err){
 					if (err) cb(err);
 					else saveBlob(cb);
 				});
 
 				function saveBlob(_cb){
 					if (!fileData){
-						_cb(undefined, docId);
+						insertInIndex();
 						return;
 					}
 					var docFilePath = pathJoin([rootPath, collectionName, docId]);
@@ -1902,121 +1980,83 @@
 					var finalFileData = concatBuffers([docNonce, encryptedFileData]);
 					//console.log('Blob encrypted');
 					docIndexObj.k = to_base64(docKey, true);
-					serializedDocIndexObj.k = docIndexObj.k;
 					//Updating DB size calculation
 					docIndexObj.size = finalFileData.length;
-					serializedDocIndexObj.size = docIndexObj.size;
 
-					documentsIndex.collectionSize += finalFileData.length;
-					serializedIndex.collectionSize = documentsIndex.collectionSize;
-					//console.log('Saving encryption key');
-					if (doNotWriteIndex){
-						writeBlob();
-					} else {
-						saveDocumentsIndex(function(err){
-							if (err){
-								_cb(err);
-								return;
-							}
-							writeBlob();
-						});
-					}
+					collectionMeta.collectionBlobSize += finalFileData.length;
 
-					/*saveDocumentsIndex(function(err){
-						if (err){
+					fs.unlink(docFilePath, function(err){ //Deleting the blob file, if there is one. Basically, ensuring an overwrite
+						if (err && !(err.code && typeof err.code == 'string' && err.code == 'ENOENT')){ //If there is an error, and it's not because a file doesn't exists : pass error through callback
 							_cb(err);
 							return;
 						}
-						//console.log('Rewriting index');
-						fs.unlink(docFilePath, function(err){ //Deleting the blob file, if there is one. Basically, ensuring an overwrite
-							if (err){
-								_cb(err);
-								return;
+						fs.writeFile(docFilePath, checkWriteBuffer(finalFileData), function(err){
+							if (err) _cb(err);
+							else {
+								saveMetaIndex(function(err){
+									if (err) console.error('Error while saving _meta for collection ' + collectionName + ': ' + err);
+								});
+								insertInIndex();
 							}
-							fs.writeFile(docFilePath, finalFileData, function(err){
-								if (err) _cb(err);
-								else {
-									_cb(undefined, docId);
-								}
-							});
 						});
-					});*/
-
-					function writeBlob(){
-						fs.unlink(docFilePath, function(err){ //Deleting the blob file, if there is one. Basically, ensuring an overwrite
-							if (err && !(err.code && typeof err.code == 'string' && err.code == 'ENOENT')){ //If there is an error, and it's not because a file doesn't exists : pass error through callback
-								_cb(err);
-								return;
-							}
-							fs.writeFile(docFilePath, checkWriteBuffer(finalFileData), function(err){
-								if (err) _cb(err);
-								else {
-									_cb(undefined, docId);
-								}
-							});
-						});
-					}
+					});
 				}
 
-				function saveIndex(_cb){
+				function prepareIndex(_cb){
 					//If a docId is provided, use it (it may overwrite an existing doc, but we've checked that before). Otherwise, generate one
 
 					if (!docId){
 						//Generating doc IDs until we get a unique one. Note that if the docId has been provided by the user, it has been checked for unicity earlier
-						do {
-							docId = docId || to_hex(randomBuffer(8));
-						} while (!checkIdIsUnique(docId));
-					}
-
-					if (!docId){
 						function tryId(){
+							docId = to_hex(randomBuffer(8));
+							checkIdIsUnique(docId, function(err, isUnique){
+								if (err){
+									_cb(err);
+									return;
+								}
 
+								if (isUnique) afterIdValidation();
+								else tryId();
+							});
 						}
-					}
+
+						tryId();
+					} else afterIdValidation();
 
 					function afterIdValidation(){
+						var ttlData;
+						if (ttl){
+							if (ttl < Date.now()) ttlData = ttl + Date.now();
+							else ttlData = ttl;
+						}
 
+						docIndexObj = {
+							index: indexData,
+							blobType: blobType
+						};
+
+						if (ttlData){
+							setTTLForId(docId, ttlData, function(err){
+								if (err){
+									_cb(err);
+									return;
+								}
+
+								proceedToSave();
+							});
+						} else proceedToSave();
+
+						function proceedToSave(){
+							if (fileData) _cb();
+							else insertInIndex();
+						}
 					}
+				}
 
-					var updateOrOverwrite = false;
-					if (documentsIndex.documents[docId]){
-						/*	At this point, if there is already a document with that Id in the index,
-							we are overwriting it. Meaning also that we must not increment the docCount
-						*/
-						updateOrOverwrite = true;
-					}
-
-					var ttlData;
-					if (ttl){
-						if (ttl < Date.now()) ttlData = ttl + Date.now();
-						else ttlData = ttl;
-					}
-
-					docIndexObj = {
-						index: indexData,
-						blobType: blobType,
-						ttl: ttlData
-					};
-
-					if (!updateOrOverwrite){
-						documentsIndex.docCount++;
-						serializedIndex.docCount++;
-					}
-
-					documentsIndex.documents[docId] = docIndexObj;
-
-					serializedDocIndexObj = {blobType: blobType, ttl: ttlData};
-					serializedDocIndexObj.index = serializeObject(docIndexObj.index);
-					serializedIndex.documents[docId] = serializedDocIndexObj;
-
-					//console.log('Saving index data');
-					if (doNotWriteIndex){
-						_cb(undefined, docId);
-						return;
-					}
-					saveDocumentsIndex(function(err){
-						_cb(err, docId);
-					});
+				function insertInIndex(){
+					collectionIndex.add(docId, docIndexObj, function(err){
+						cb(err, docId);
+					}, doNotWriteIndex, true);
 				}
 			}
 
@@ -2025,129 +2065,216 @@
 				var docId;
 
 				if (typeof idOrDoc == 'string'){
-					doc = documentsIndex.documents[idOrDoc];
-					docId = idOrDoc;
+					collectionIndex.lookup(idOrDoc, function(err, _doc){
+						if (err){
+							cb(err);
+							return;
+						}
+
+						doc = _doc;
+						docId = idOrDoc;
+						afterLookup();
+					});
 				} else if (typeof idOrDoc == 'object'){
 					doc = idOrDoc;
 					docId = doc.id;
+					afterLookup();
 				} else {
 					throw new TypeError('Invalid idOrDoc reference type: ' + typeof idOrDoc);
 				}
 
-				if (doc.k){
-					var docFilePath = pathJoin([rootPath, collectionName, docId]);
-					fsExists(docFilePath, function(blobExists){
-						if (!blobExists){
-							cb('Encrypted blob cannot be found');
-							return;
-						}
-						fs.readFile(docFilePath, function(err, data){
-							if (err){
-								cb(err);
+				function afterLookup(){
+					if (doc.k){
+						var docFilePath = pathJoin([rootPath, collectionName, docId]);
+						fsExists(docFilePath, function(blobExists){
+							if (!blobExists){
+								cb('Encrypted blob cannot be found');
 								return;
 							}
-							//var fileDataBuffer = from_base64(data);
-							var fileDataBuffer = checkReadBuffer(data);
-							if (fileDataBuffer.length < minFileSize){
-								cb('INVALID_BLOB');
-								return;
-							}
-
-							var nonceBuffer = new Uint8Array(sodium.crypto_secretbox_NONCEBYTES);
-							for (var i = 0; i < nonceBuffer.length; i++){
-								nonceBuffer[i] = fileDataBuffer[i];
-							}
-							var cipherBuffer = new Uint8Array(fileDataBuffer.length - nonceBuffer.length);
-							for (var i = 0; i < cipherBuffer.length; i++){
-								cipherBuffer[i] = fileDataBuffer[ i + sodium.crypto_secretbox_NONCEBYTES ];
-							}
-
-							var decryptedBlob = sodium.crypto_secretbox_open_easy(cipherBuffer, nonceBuffer, from_base64(doc.k));
-							if (!decryptedBlob){
-								cb('CORRUPTED_BLOB');
-								return;
-							}
-
-							//Reconvert the blob to its original format
-							var bType = doc.blobType;
-							var result;
-							if (bType == 'buffer'){
-								result = decryptedBlob;
-							} else if (bType == 'json'){
-								var resultStr = to_string(decryptedBlob);
-								try {
-									result = JSON.parse(resultStr);
-								} catch (e){
-									cb(new Error('Invalid JSON'));
+							fs.readFile(docFilePath, function(err, data){
+								if (err){
+									cb(err);
+									return;
+								}
+								//var fileDataBuffer = from_base64(data);
+								var fileDataBuffer = checkReadBuffer(data);
+								if (fileDataBuffer.length < minFileSize){
+									cb('INVALID_BLOB');
 									return;
 								}
 
-								result = deserializeObject(result);
-							} else if (bType == 'string'){
-								var resultStr = to_string(decryptedBlob);
-								result = resultStr;
-							} else {
-								callback(new Error('Invalid blob type: ' + bType));
-								//What?
-							}
-							cb(undefined, result);
+								var nonceBuffer = new Uint8Array(sodium.crypto_secretbox_NONCEBYTES);
+								for (var i = 0; i < nonceBuffer.length; i++){
+									nonceBuffer[i] = fileDataBuffer[i];
+								}
+								var cipherBuffer = new Uint8Array(fileDataBuffer.length - nonceBuffer.length);
+								for (var i = 0; i < cipherBuffer.length; i++){
+									cipherBuffer[i] = fileDataBuffer[ i + sodium.crypto_secretbox_NONCEBYTES ];
+								}
+
+								var decryptedBlob = sodium.crypto_secretbox_open_easy(cipherBuffer, nonceBuffer, from_base64(doc.k));
+								if (!decryptedBlob){
+									cb('CORRUPTED_BLOB');
+									return;
+								}
+
+								//Reconvert the blob to its original format
+								var bType = doc.blobType;
+								var result;
+								if (bType == 'buffer'){
+									result = decryptedBlob;
+								} else if (bType == 'json'){
+									var resultStr = to_string(decryptedBlob);
+									try {
+										result = JSON.parse(resultStr);
+									} catch (e){
+										cb(new Error('Invalid JSON'));
+										return;
+									}
+
+									result = deserializeObject(result);
+								} else if (bType == 'string'){
+									var resultStr = to_string(decryptedBlob);
+									result = resultStr;
+								} else {
+									callback(new Error('Invalid blob type: ' + bType));
+									//What?
+								}
+								cb(undefined, result);
+							});
 						});
-					});
-				} else cb(undefined, clone(doc.index));
+					} else cb(undefined, clone(doc.index));
+				}
 			}
 
 			function ttlCheckAndPurge(cb){
 				if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
 
-				if (purgeOngoing) return;
-				var purgeOngoing = true;
-				var n = Date.now();
+				if (collectionTTLs == -1) return; //No TTLs for this collection
 
-				var docsToDelete;
-
-				var docsList = Object.keys(documentsIndex.documents);
-				for (var i = 0; i < docsList.length; i++){
-					var ttlVal = documentsIndex.documents[docsList[i]].ttl;
-					if (ttlVal && ttlVal <= n){
-						if (!docsToDelete) docsToDelete = [docsList[i]];
-						else docsToDelete.push(docsList[i]);
-					}
-				}
-
-				if (docsToDelete && docsToDelete.length > 0) console.log('Expired docs from collection ' + collectionName + ': ' + JSON.stringify(docsToDelete));
-
-				var docIndex = 0;
-
-				function deleteOne(){
-					var currentDocId = docsToDelete[docIndex];
-					removeDoc(currentDocId, function(err){
-						if (err){
-							if (cb) cb(err);
-							else console.error('Error while trying to delete the expired doc ' + currentDocId + ' from collection ' + collectionName + ': ' + err);
+				//This code segment is to be executed typically when loading the collection
+				if (!collectionTTLs){
+					fsExists(ttlsFilePath, function(ttlsExist){
+						if (!ttlsExist){
+							collectionTTLs = -1;
+							if (cb) cb();
 							return;
-						}
-						docIndex++;
-						if (docIndex == docsToDelete.length){
-							saveDocumentsIndex(function(err){
+						} else {
+							fs.readFile(ttlsFilePath, function(err, data){
 								if (err){
-									console.error('Error while saving doc index for deleting expired docs: ' + err);
+									if (cb) cb(err);
+									return;
 								}
+
+								var ttlsCipher = checkReadBuffer(data);
+								var ttlsBuffer;
+								try {
+									ttlsBuffer = scryptFileDecode(ttlsCipher, k);
+								} catch (e){
+									console.error('Cannot decrypt TTLs list for collection ' + collectionName + ': ' + err);
+									if (cb) cb('INVALID_ROOTKEY');
+									return;
+								}
+
+								try {
+									collectionTTLs = JSON.parse(to_string(ttlsBuffer));
+								} catch (e){
+									if (cb) cb('INVALID_TTLS');
+									return;
+								}
+
+								runPurge();
+							});
+						}
+					});
+				} else runPurge();
+
+				function runPurge(){
+					if (purgeOngoing) return;
+					purgeOngoing = true;
+					var n = Date.now();
+
+					var docsToDelete;
+
+					var docsList = Object.keys(collectionTTLs);
+					for (var i = 0; i < docsList.length; i++){
+						var ttlVal = collectionTTLs[docsList[i]];
+						if (ttlVal && ttlVal <= n){
+							if (!docsToDelete) docsToDelete = [docsList[i]];
+							else docsToDelete.push(docsList[i]);
+						}
+					}
+
+					if (docsToDelete && docsToDelete.length > 0) console.log('Expired docs from collection ' + collectionName + ': ' + JSON.stringify(docsToDelete));
+
+					var docIndex = 0;
+
+					function deleteOne(){
+						var currentDocId = docsToDelete[docIndex];
+						removeDoc(currentDocId, function(err){
+							if (err){
+								if (cb) cb(err);
+								else console.error('Error while trying to delete the expired doc ' + currentDocId + ' from collection ' + collectionName + ': ' + err);
+								return;
+							}
+							docIndex++;
+							if (docIndex == docsToDelete.length){
 								purgeOngoing = false;
 								if (cb) cb();
-								return;
-							});
-						} else {
-							//Chain doc deletions
-							if (docIndex % 100 == 0) setTimeout(deleteOne, 0);
-							else deleteOne();
-						}
-					}, true); //Do not save doc index after deleting one doc, but rather after deleting all expired docs
+							} else {
+								//Chain doc deletions
+								if (docIndex % 100 == 0) setTimeout(deleteOne, 0);
+								else deleteOne();
+							}
+						}, docIndex < docsToDelete.length - 1); //Do not save doc index after deleting one doc, but rather after deleting all expired docs
+					}
+
+					if (docsToDelete) deleteOne();
+					else {
+						purgeOngoing = false;
+						if (cb) cb();
+					}
+				}
+			}
+
+			function setTTLForId(id, ttl, cb){
+				if (!collectionTTLs){ //Waiting for the purging system to load the TTLs file
+					setTimeout(function(){
+						setTTLForId(id, ttl, cb);
+					}, purgeIntervalValue);
+					return;
 				}
 
-				if (docsToDelete) deleteOne();
+				if (collectionTTLs == -1){
+					collectionTTLs = {};
+				}
+
+				if (Array.isArray(id)){
+					for (var i = 0; i < id.length; i++){
+						collectionTTLs[id[i]] = ttl;
+					}
+				} else collectionTTLs[id] = ttl;
+
+				saveTTLs(cb);
+			}
+
+			function getTTLForId(id, cb){
+				if (!collectionTTLs){ //Waiting for the purging system to load the TTLs file
+					setTimeout(function(){
+						getTTLForId(id, cb);
+					}, purgeIntervalValue);
+					return;
+				}
+
+				if (collectionTTLs == -1) cb();
 				else {
-					purgeOngoing = false;
-					if (cb) cb();
+					if (Array.isArray(id)){
+						var r = {};
+						for (var i = 0; i < id.length; i++){
+							r[id[i]] = collectionTTLs[id[i]];
+						}
+						cb(r);
+					} else cb(collectionTTLs[id]);
 				}
 			}
 
@@ -2155,32 +2282,20 @@
 				if (!cb) throw new Error('Missing callback');
 
 				collectionIndex.lookup(id, function(err, v){
-					cb(err, !!v);
+					cb(err, !v);
 				});
 			}
 
 			function checkFieldIsUnique(fieldName, value, cb){
 				if (!cb) throw new TypeError('Missing callback');
 
-				var indexIterator = collectionIndex.iterator();
-
-				function iterateOne(){
-
+				function mapUnicitiyCheckFn(doc, emit){
+					if (doc.index[fieldName == value]) emit(doc.id);
 				}
 
-				function iterateNext(){
-
-				}
-
-				var docsList = Object.keys(documentsIndex.documents);
-				for (var i = 0; i < docsList.length; i++){
-					if (documentsIndex.documents[docsList[i]].index[fieldName] == value){
-						if (cb) cb(false);
-						return false;
-					}
-				}
-				if (cb) cb(true);
-				return true;
+				collectionIndex.map(mapUnicitiyCheckFn, function(err, matchedDocs){
+					cb(err, matchedDocs.length == 0);
+				}, 1);
 			}
 
 		}
@@ -2433,7 +2548,7 @@
 	* Shallow copy of an object.
 	*/
 	function shallowCopy(source, target){
-		if (typeof source != 'object') throw new TypeError('source must be an object');
+		if (typeof source != 'object') return source;
 		if (target && typeof target != 'object') throw new TypeError('when defined, target must be an object');
 
 		var c = target || {};
@@ -2925,7 +3040,7 @@
 			}
 		};
 
-		self.add = function(key, value, cb, noTrigger){
+		self.add = function(key, value, cb, noTrigger, replace){
 			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
 			//We must check that the range that corresponds to the key is currently loaded
 			var keyHash = hashToLong(key);
@@ -2939,11 +3054,11 @@
 						return;
 					}
 
-					theTree.add(key, value, noTrigger);
+					theTree.add(key, value, noTrigger, replace);
 					if (cb) cb();
 				});
 			} else {
-				theTree.add(key, value, noTrigger);
+				theTree.add(key, value, noTrigger, replace);
 				if (cb) cb();
 			}
 		};
@@ -3062,26 +3177,40 @@
 			return new KeyValueIterator();
 		};
 
-		self.map = function(mapFn, cb){
+		self.map = function(mapFn, cb, limit, forQuery){
 			if (typeof mapFn != 'function') throw new TypeError('mapFn must be a function');
 			if (typeof cb != 'function') throw new TypeError('cb must be a function');
+			if (limit && !(typeof limit == 'number' && Math.floor(limit) == limit && limit > 0)) throw new TypeError('when defined, limit must be a strictly positive integer number');
 
 			var treeTraveler = self.nodeIterator();
 			var currentNode;
 
 			var resultSet = [];
 
+			var limitReached = false;
+
 			function iterateNode(){
-				var currentSubCollection = currentNode.getBinnedRange('clone').subCollection;
-				var keysList = Object.keys(currentSubCollection);
-				for (var i = 0; i < keysList.length; i++){
-					mapFn(currentSubCollection[keysList[i]], emit);
+				var currentSubCollection = currentNode.getBinnedRange(forQuery ? 'none' : 'clone').subCollection;
+
+				if (forQuery){
+					mapFn(currentSubCollection);
+					nextNode();
+				} else {
+					var keysList = Object.keys(currentSubCollection);
+					for (var i = 0; i < keysList.length; i++){
+						currentSubCollection[keysList[i]].id = keysList[i];
+						mapFn(currentSubCollection[keysList[i]], emit);
+						if (limit && resultSet.length == limit){
+							limitReached = true;
+							break;
+						}
+					}
+					nextNode();
 				}
-				nextNode();
 			}
 
 			function nextNode(){
-				if (treeTraveler.hasNext()){
+				if (treeTraveler.hasNext() && !limitReached){
 					treeTraveler.next(function(err, _n){
 						if (err){
 							cb(err);
@@ -3483,13 +3612,13 @@
 		* @param {String|Number} key - the key (i.e, identifier) that will be used to retrieve the value from the tree
 		* @param {String|Object|Number} [value] - the data to be stored in the tree for the given key. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the current collection
 		*/
-		self.add = function(key, value, noTrigger){
+		self.add = function(key, value, noTrigger, replace){
 			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
 			var valType = typeof value;
 			if (!(valType == 'string' || valType == 'number' || valType == 'object')) throw new TypeError('value must either be a string, a number, or a JSON object');
 
-			rootNode.add(key, value, noTrigger);
+			rootNode.add(key, value, noTrigger, replace);
 		};
 
 		self.remove = function(key, value, noTrigger){
@@ -3758,9 +3887,9 @@
 			* @param {String|Number} key - the key (i.e, identifier) that will be used to retrieve the value from the tree
 			* @param {String|Number|Object} [value] - the data to be stored in the tree for the given key. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the current collection
 			*/
-			thisNode.add = function(key, value, noTrigger){
+			thisNode.add = function(key, value, noTrigger, replace){
 				var keyHash = hasher(key);
-				thisNode.addWithHash(keyHash, key, value, noTrigger);
+				thisNode.addWithHash(keyHash, key, value, noTrigger, replace);
 			};
 
 			/**
@@ -3769,7 +3898,7 @@
 			* @param {String|Number} key - the key to add to the tree
 			* @param {String|Number|Object} [value] - the value to be stored in the tree for the given {hash, key}. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the collection
 			*/
-			thisNode.addWithHash = function(hash, key, value, noTrigger){
+			thisNode.addWithHash = function(hash, key, value, noTrigger, replace){
 				if (!(hash instanceof Uint8Array && hash.length == 8) && !(hash instanceof Long)) throw new TypeError('hash must be a non-empty array or a Long instance');
 				if (hash instanceof Uint8Array){
 					hash = bufferBEToLong(hash);
@@ -3789,7 +3918,7 @@
 						currentDataSize += newDataSize;
 
 						if (disallowKeyCollisions){
-							if (subCollection[key]) throw new RangeError('key "' + key + '" already taken');
+							if (subCollection[key] && !replace) throw new RangeError('key "' + key + '" already taken');
 							subCollection[key] = value
 						} else {
 							if (subCollection[key]) subCollection[key].push(value);
