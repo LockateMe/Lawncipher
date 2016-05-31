@@ -13,7 +13,7 @@
 		factory(exports, require('libsodium-wrappers'), console, _nodeContext, require, !_nodeContext ? window : undefined, require('long'));
 	} else {
 		var cb = root.Lawncipher && root.Lawncipher.onload;
-		factory((root.Lawncipher = {}), sodium, console, _nodeContext, typeof require != 'undefined' && require, !_nodeContext ? window : undefined, Long);
+		factory((root.Lawncipher = {}), sodium, console, _nodeContext, typeof require != 'undefined' && require, !_nodeContext ? window : undefined, window.dcodeIO.Long);
 		if (typeof cb == 'function'){
 			cb(root.Lawncipher);
 		}
@@ -3304,7 +3304,7 @@
 			fs.readFile(fileName, function(err, fileData){
 				if (err){
 					//Support the case where the index fragment file doesn't exist (in Node.js and cordova-plugin-file-node-like)
-					if (err.message.indexOf('ENOENT') != -1 || err.message.indexOf('NOT_FOUND_ERR') != -1){
+					if ((typeof err == 'string' && err.indexOf('NOT_FOUND_ERR') != -1) || (err.message.indexOf('ENOENT') != -1)){
 						if (_cb) _cb();
 						return;
 					}
