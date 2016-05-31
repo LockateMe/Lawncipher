@@ -5,6 +5,8 @@ var Lawncipher = require('../');
 var Long = require('long');
 var faker = require('faker');
 
+var runMega = process.argv.length > 2 && process.argv[2] == 'mega';
+
 var rmdir = require('rmdir');
 
 var sodium = require('libsodium-wrappers');
@@ -346,6 +348,7 @@ basicTests(function(){
 				var duration = clock(st3);
 				console.log('done in ' + duration.toString() + 'ms');
 
+				if (!runMega) return;
 				console.log('');
 				console.log('----------------------');
 				console.log('Mega load index testing (500k docs)');
