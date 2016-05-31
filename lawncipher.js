@@ -1694,13 +1694,10 @@
 				}
 
 				var resultSet = [];
-				//var resultSetRemainder = limit;
 
 				function mapFn(subset, countResult){
 					var partialResult = applyQuery(query, subset, undefined, matchFunction, includePureBlobs);
 					Array.prototype.push.apply(resultSet, partialResult);
-
-					//if (limit) resultSetRemainder -= partialResult.length;
 				}
 
 				collectionIndex.map(mapFn, function(err){
