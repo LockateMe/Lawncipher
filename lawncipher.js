@@ -3406,7 +3406,7 @@
 			var fragmentPath = pathJoin(collectionPath, fragmentNameBuilder(fRange))
 			fs.unlink(fragmentPath, function(err){
 				if (err){
-					if (err.message.indexOf('ENOENT') == -1){
+					if ((typeof err == 'string' && err != 'FILE_NOT_FOUND') || err.message.indexOf('ENOENT') == -1){
 						if (_cb) _cb(err);
 						else console.error('Cannot remove index fragment ' + fragmentPath + ': ' + err);
 						return;
