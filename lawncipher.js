@@ -119,6 +119,7 @@
 	}
 
 	if (!sodium) throw new Error('Error on loading Lawncipher : Libsodium is missing');
+	if (!Long) throw new Error('Error on loading Lawncipher: Long.js is missing');
 
 	var from_hex = sodium.from_hex, to_hex = sodium.to_hex, from_base64 = sodium.from_base64, to_base64 = sodium.to_base64;
 	var from_string = sodium.string_to_Uint8Array || sodium.from_string;// to_string = sodium.uint8Array_to_String || sodium.to_string;
@@ -1488,6 +1489,14 @@
 					cb(new Error('when defined, limit must be a strictly integer number'));
 					return;
 				}
+
+				if (typeof q == 'string'){
+					readDoc(q, function(err, r){
+						cb(err, [r]);
+					});
+					return;
+				}
+
 				//If not blob, just return index data
 				retrieveIndexDocsMatchingQuery(q, limit, undefined, undefined, function(err, results){
 					if (err){
@@ -1684,8 +1693,18 @@
 
 			function retrieveIndexDocsMatchingQuery(query, limit, matchFunction, includePureBlobs, cb){
 
+				/*if (typeof query == 'string'){
+					//Lookup by id;
+					collectionIndex.lookup(query, function(err, matchedDoc){
+						if (matchedDoc) matchedDoc.id = query;
+						cb(err, [matchedDoc]);
+					});
+					return;
+				}*/
+
 				//Ignore sorting, as this will be done by the function calling this one (i.e : find or findOne)
 				query = query && shallowCopy(query);
+
 				var sortQuery;
 				if (query && (query.$sort || query.$skip)){
 					sortQuery = {$sort: query.$sort, $skip: query.$skip};
@@ -2067,6 +2086,11 @@
 							return;
 						}
 
+						if (!_doc){
+							cb();
+							return;
+						}
+
 						doc = _doc;
 						docId = idOrDoc;
 						afterLookup();
@@ -2146,7 +2170,10 @@
 			function ttlCheckAndPurge(cb){
 				if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
 
-				if (collectionTTLs == -1) return; //No TTLs for this collection
+				if (collectionTTLs == -1){
+					if (cb) cb();
+					return; //No TTLs for this collection
+				}
 
 				//This code segment is to be executed typically when loading the collection
 				if (!collectionTTLs){
@@ -2155,6 +2182,11 @@
 							if (cb) cb();
 							else throw err;
 							return;
+						}
+
+						if (collectionTTLs == -1){
+							if (cb) cb();
+							return; //No TTLs for this collection
 						}
 
 						runPurge();
@@ -3970,9 +4002,9 @@
 					if (newNodeSize >= maxBinWidth){
 						splitNode(noTrigger);
 						if (hash.lte(middlePoint)){
-							left.addWithHash(hash, key, value, noTrigger);
+							left.addWithHash(hash, key, value, noTrigger, replace);
 						} else {
-							right.addWithHash(hash, key, value, noTrigger);
+							right.addWithHash(hash, key, value, noTrigger, replace);
 						}
 					} else {
 						currentDataSize += newDataSize;
@@ -3991,10 +4023,10 @@
 				} else {
 					if (hash.lte(middlePoint)){
 						//Go to left-side child
-						left.addWithHash(hash, key, value, noTrigger);
+						left.addWithHash(hash, key, value, noTrigger, replace);
 					} else {
 						//Go to right-side child
-						right.addWithHash(hash, key, value, noTrigger);
+						right.addWithHash(hash, key, value, noTrigger, replace);
 					}
 				}
 			};
