@@ -6,13 +6,13 @@ stages:
   - test
 
 check_v0_10:
-  script: "./tests/test_all.sh"
+  script: "cd tests && ./test_all.sh"
   stage: test
   tags:
     - v0_10
 
 check_v5:
-  script: "./tests/test_all.sh"
+  script: "cd tests && ./test_all.sh"
   stage: test
   tags:
     - v5
