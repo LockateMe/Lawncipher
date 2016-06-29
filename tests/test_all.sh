@@ -5,8 +5,8 @@ set -e
 if [ -d "./test_db" ]; then
 	rm -r ./test_db
 fi
-if [ -d "./tests/test_index" ]; then
-	rm -r ./tests/test_index
+if [ -d "./test_index" ]; then
+	rm -r ./test_index
 fi
 
 echo "-----------------------------------"
@@ -14,24 +14,24 @@ echo "Unit testing Lawncipher's internals"
 echo "-----------------------------------"
 echo ""
 echo "to_string() with big Uint8Arrays"
-node tests/tostring.js
+node tostring.js
 echo "LRU String Set"
-node tests/lru.js
+node lru.js
 echo "Pearson Seed Generator"
-node tests/pearsonseedgenerator.js
+node pearsonseedgenerator.js
 echo "Pearson hashing"
-node tests/pearsonhasher.js
+node pearsonhasher.js
 echo "Pearson ranges"
-node tests/pearsonrange.js
+node pearsonrange.js
 echo "Pearson-based B+ trees"
-node tests/pearsonbplustree.js
+node pearsonbplustree.js
 echo "Splitted indexes"
-mkdir -p tests/test_index
-node tests/splitindex.js
+mkdir -p test_index
+node splitindex.js
 
 echo ""
 echo "-----------------------------------"
 echo "Unit testing Lawncipher"
 echo "-----------------------------------"
 echo ""
-node test.js
+node unit_test.js
