@@ -9,7 +9,7 @@ module.exports = function(grunt){
 				verbose: true
 			},
 			src: ['lawncipher.js'],
-			tests: ['test.js', 'tests/**/*.js']
+			tests: ['tests/**/*.js']
 		}
 	});
 

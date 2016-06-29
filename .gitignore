@@ -2,5 +2,5 @@
 */.DS_Store
 node_modules/
 bower_components/
-test_db/
+tests/test_db/
 tests/*_index/

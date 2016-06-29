@@ -162,7 +162,7 @@ Here is how you can run unit tests in the compatible runtimes
 Go to the directory where the Lawncipher library is located, and run
 
 ```shell
-node test.js
+npm test
 ```
 
 ### Cordova/Phonegap
