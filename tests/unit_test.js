@@ -7,7 +7,7 @@
 	if (typeof define === 'function' && define.amd){
 		define(['exports', 'Lawncipher', 'console', _nodeContext.toString(), 'require', 'window'], factory);
 	} else if (typeof exports !== 'undefined'){
-		factory(exports, require('./lawncipher.js'), console, _nodeContext, require, !_nodeContext ? window : undefined);
+		factory(exports, _nodeContext ? require('../lawncipher.js') : require('./lawncipher.js'), console, _nodeContext, require, !_nodeContext ? window : undefined);
 	} else {
 		var cb = root.LawncipherTest && root.LawncipherTest.onload;
 		factory((root.LawncipherTest = {}), Lawncipher, console, _nodeContext, typeof require != 'undefined' && require, !_nodeContext ? window : undefined);
