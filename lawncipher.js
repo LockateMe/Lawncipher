@@ -313,6 +313,8 @@
 	}
 
 	function useCordovaPluginScrypt(){
+		if (!window.plugins.scrypt) throw new Error('cordova-plugin-scrypt cannot be found!');
+
 		scryptProvAsync = true;
 		scryptProv = cordovaPluginScryptProvider;
 	}
