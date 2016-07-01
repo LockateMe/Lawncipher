@@ -4,3 +4,4 @@ node_modules/
 bower_components/
 tests/test_db/
 tests/*_index/
+tests/test_migration*/

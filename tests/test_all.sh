@@ -35,3 +35,11 @@ echo "Unit testing Lawncipher"
 echo "-----------------------------------"
 echo ""
 node unit_test.js
+
+echo ""
+echo "-----------------------------------"
+echo "Migration testing (from v1)"
+echo "-----------------------------------"
+echo ""
+./migrate.sh
+

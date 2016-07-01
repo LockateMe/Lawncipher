@@ -468,22 +468,12 @@
 					return;
 				}
 
-				//var endCount = 0;
-
 				//This loop has async-only behavior, hence the async-handling code in this method is useless and commented out
 				for (var i = 0; i < rootIndex.length; i++){
 					loadOne(rootIndex[i]);
 				}
 
 				callback();
-
-				/*function endLoad(){
-					endCount++;
-					if (endCount == rootIndex.length){
-						//console.log('Collections loaded');
-						callback();
-					}
-				}*/
 
 				function loadOne(c){
 					var missingVarName;
@@ -495,11 +485,6 @@
 						//endLoad();
 						//return;
 					}
-
-					//Default TTL parameter to be included here as well??
-
-					//endLoad();
-					//Why async-like code when behavior is sync?
 				}
 			}
 		}
@@ -954,7 +939,7 @@
 
 			function migrateV1DocumentsIndex(){
 				console.log('Migrating DB from v1');
-				fs.readFile(indexFilePath, function(err, data){
+				fs.readFile(legacy_indexFilePath, function(err, data){
 					if (err){
 						console.error('Error while reading index file for collection ' + collectionName + ': ' + err);
 						cb(err);
