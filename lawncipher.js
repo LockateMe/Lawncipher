@@ -1025,46 +1025,67 @@
 						});
 					});
 				});
-
-				/*fsExists(indexFilePath, function(indexExists){
-					if (indexExists){
-						function l(){ //Load existing index
-
-						}
-
-						setTimeout(l, 0);
-					} else {
-						function c(){
-							//Creating new documents index, encrypting and saving it. Given the indexModel...
-							var newDocumentsIndex = clone(collectionIndexFileModel);
-							if (indexModel) newDocumentsIndex.indexModel = indexModel;
-							//documentsIndex = newDocumentsIndex;
-							serializedIndex = clone(documentsIndex);
-							serializedIndex.seeds = indexesSeeds;
-							indexesSeeds._index = PearsonSeedGenerator();
-
-							mkdirp(collectionPath, function(err){
-								if (err){
-									cb(err);
-									return;
-								}
-								saveDocumentsIndex(function(err){
-									if (err){
-										cb(err);
-										return;
-									}
-									purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue);
-									cb(undefined, self)
-								});
-							});
-						}
-
-						setTimeout(c, 0);
-					}
-				});*/
 			}
 
-			this.save = function(blob, index, cb, overwrite, ttl, doNotWriteIndex){
+			this.save = function(doc, cb, overwrite, ttl, doNotWriteIndex){
+				if (typeof cb != 'function') throw new TypeError('callback must be a function');
+
+				var blob, index;
+
+				if (!doc){
+					cb(new TypeError('doc cannot be undefined or null'));
+					return;
+				}
+
+				var td = typeof doc;
+				if (td == 'string' || doc instanceof Uint8Array){
+					blob = doc;
+				} else if (td == 'object'){
+					if (Array.isArray(doc)){ // An Array cannot be stored as index data -> blob
+						blob = doc;
+					} else { //A non-null empty object, that is not a Uint8Array nor an Array
+						//Check the attributes in that object
+						//If we have __index or __blob. -> Explicit mode
+						if (doc.__index || doc.__blob){
+							if (doc.__index) index = doc.__index;
+							if (doc.__blob) blob = doc.__blob;
+							if (doc.__ttl) ttl = doc.__ttl;
+						} else { //Implicit mode.
+							//But what if there is no index model? Save doc as blob. We are blob-first after all
+							if (!indexModel){
+								blob = doc;
+							} else {
+								//If there are attributes that are not in the index model
+								//it extracts the attributes that are part of the index model
+								var hasExtraAttributes = false;
+								var docAttributes = Object.keys(doc);
+								for (var i = 0; i < docAttributes.length; i++){
+									if (!indexModel[docAttributes[i]]){
+										hasExtraAttributes = true;
+										break;
+									}
+								}
+
+								if (hasExtraAttributes){
+									index = {};
+									blob = doc;
+									var indexAttributes = Object.keys(indexModel);
+									for (var i = 0; indexAttributes.length; i++){
+										index[indexAttributes[i]] = doc[indexAttributes[i]];
+									}
+								} else {
+									//All the attribudes of doc fit in the model. Hence save as indexData
+									index = doc;
+								}
+							}
+						}
+					}
+				}
+
+				self.__save(blob, index, cb, overwrite, ttl, doNotWriteIndex);
+			};
+
+			this.__save = function(blob, index, cb, overwrite, ttl, doNotWriteIndex){
 				if (typeof cb != 'function') throw new TypeError('callback must be a function');
 				var fileData, indexData, docId, docIndexObj, serializedDocIndexObj;
 				//If not blob, just save index data
@@ -1074,7 +1095,7 @@
 				if (tb == 'string'){
 					fileData = blob;
 					blobType = 'string'
-				} else if (blob instanceof Uint8Array){ //Casting into string
+				} else if (blob instanceof Uint8Array){
 					fileData = blob;
 					blobType = 'buffer';
 				} else if (blob && tb == 'object'){ //Ensuring object and not null. Works for arrays as well
@@ -1237,7 +1258,24 @@
 				}
 			};
 
-			this.bulkSave = function(blobs, indices, cb, overwrite, ttl){
+			this.bulkSave = function(docs, cb, overwrite, ttl){
+				if (typeof cb != 'function') throw new TypeError('cb must be a function');
+				if (!(docs && Array.isArray(docs) && docs.length > 0)){
+					cb(new TypeError('docs must be a non-empty array'));
+					return;
+				}
+
+				var indices = new Array(docs.length);
+				var blobs = new Array(docs.length);
+
+				for (var i = 0; i < docs.length; i++){
+
+				}
+
+				self.__bulkSave(blobs, indices, cb, overwrite, ttl);
+			};
+
+			this.__bulkSave = function(blobs, indices, cb, overwrite, ttl){
 				if (typeof cb != 'function') throw new TypeError('cb must be a function');
 				if (blobs && !Array.isArray(blobs)){
 					cb(new TypeError('when defined, blobs must be an array'));
@@ -1289,7 +1327,7 @@
 				var _saveIndex = 0;
 				var isLast = false;
 				function saveOne(){
-					self.save(blobs ? blobs[_saveIndex] : undefined, indices ? indices[_saveIndex] : undefined, function(err, docId){
+					self.__save(blobs ? blobs[_saveIndex] : undefined, indices ? indices[_saveIndex] : undefined, function(err, docId){
 						if (err){
 							cb(err);
 							return;
