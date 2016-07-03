@@ -7,7 +7,8 @@ var faker = require('faker');
 
 var runMega = process.argv.length > 2 && process.argv[2] == 'mega';
 
-var rmdir = require('rmdir');
+var mkdirp = require('mkdirp');
+var rmdirr = require('rmdir');
 
 var sodium = require('libsodium-wrappers');
 var to_hex = sodium.to_hex, from_hex = sodium.from_hex;
@@ -69,7 +70,7 @@ function basicTests(next){
 	var indexKey = randomBuffer(32);
 
 	function saveIndex(_next){
-		rmdir(testIndexPath, function(err){
+		rmdirr(testIndexPath, function(err){
 			if (err) throw err;
 
 			var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, function(loadErr){
@@ -131,7 +132,7 @@ function loadTests(docCount, cb, usingNoTrigger){
 	}
 
 	function saveIndex(_next){
-		rmdir(testIndexPath, function(err){
+		rmdirr(testIndexPath, function(err){
 			if (err) throw err;
 
 			console.log('Starting index writes');

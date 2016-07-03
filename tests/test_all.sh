@@ -2,12 +2,9 @@
 
 set -e
 
-if [ -d "./test_db" ]; then
-	rm -r ./test_db
-fi
-if [ -d "./test_index" ]; then
-	rm -r ./test_index
-fi
+#if [ -d "./test_index" ]; then
+#	rm -r ./test_index
+#fi
 
 echo "-----------------------------------"
 echo "Unit testing Lawncipher's internals"
@@ -42,4 +39,3 @@ echo "Migration testing (from v1)"
 echo "-----------------------------------"
 echo ""
 ./migrate.sh
-

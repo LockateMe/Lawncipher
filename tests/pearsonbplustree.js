@@ -8,6 +8,17 @@ var to_hex = sodium.to_hex, from_hex = sodium.from_hex;
 
 var deepObjectEquality = Lawncipher.deepObjectEquality;
 
+var runMega = process.argv.length > 2 && process.argv[2] == 'mega';
+var megaDocCount = runMega && process.argv.length > 3 && process.argv[3];
+if (megaDocCount) {
+	megaDocCount = parseInt(megaDocCount);
+	if (isNaN(megaDocCount) || megaDocCount <= 0){
+		console.error('when provided, megaDocCount must be a strictly positive integer');
+		process.exit(1);
+	}
+}
+if (runMega && !megaDocCount) megaDocCount = 1000000; //megaDocCount defaults to 1M docs
+
 var PearsonBPlusTree = Lawncipher.PearsonBPlusTree;
 var PearsonSeedGenerator = Lawncipher.PearsonSeedGenerator;
 var PearsonHasher = Lawncipher.PearsonHasher;
@@ -193,8 +204,18 @@ basicTests();
 console.log('----------------------');
 console.log('Tree load testing');
 console.log('----------------------');
-loadTests();
+if (!runMega){
+	loadTests();
+} else {
+	console.log('Testing the tree with ' + megaDocCount + ' docs');
+	loadTests(megaDocCount);
+}
 console.log('----------------------');
 console.log('Postponed events testing');
 console.log('----------------------');
-postponingEventsTests();
+if (!runMega){
+	postponingEventsTests();
+} else {
+	console.log('Testing the tree with ' + megaDocCount + ' docs (with postponed events)');
+	postponingEventsTests(megaDocCount);
+}
