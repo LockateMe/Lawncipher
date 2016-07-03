@@ -1027,18 +1027,14 @@
 				});
 			}
 
-			this.save = function(doc, cb, overwrite, ttl, doNotWriteIndex){
-				if (typeof cb != 'function') throw new TypeError('callback must be a function');
+			function docToBlobAndIndex(doc){
+				if (!doc) throw new TypeError('doc annto be undefined or null');
 
-				var blob, index;
-
-				if (!doc){
-					cb(new TypeError('doc cannot be undefined or null'));
-					return;
-				}
+				var blob, index, ttl;
 
 				var td = typeof doc;
 				if (td == 'string' || doc instanceof Uint8Array){
+					if (doc.length === 0) throw new TypeError('empty document');
 					blob = doc;
 				} else if (td == 'object'){
 					if (Array.isArray(doc)){ // An Array cannot be stored as index data -> blob
@@ -1080,9 +1076,29 @@
 							}
 						}
 					}
+				} else {
+					throw new Error('doc must be either be a string, an object or a Uint8Array');
 				}
 
-				self.__save(blob, index, cb, overwrite, ttl, doNotWriteIndex);
+				return {
+					b: blob,
+					i: index,
+					t: ttl
+				};
+			}
+
+			this.save = function(doc, cb, overwrite, ttl, doNotWriteIndex){
+				if (typeof cb != 'function') throw new TypeError('callback must be a function');
+
+				var blobAndIndex;
+				try {
+					blobAndIndex = docToBlobAndIndex(doc);
+				} catch (e){
+					cb(e);
+					return;
+				}
+
+				self.__save(blobAndIndex.b, blobAndIndex.i, cb, overwrite, blobAndIndex.t || ttl, doNotWriteIndex);
 			};
 
 			this.__save = function(blob, index, cb, overwrite, ttl, doNotWriteIndex){
@@ -1267,12 +1283,22 @@
 
 				var indices = new Array(docs.length);
 				var blobs = new Array(docs.length);
+				var ttlArray = new Array(docs.length);
 
 				for (var i = 0; i < docs.length; i++){
-
+					var blobAndIndex;
+					try {
+						blobAndIndex = docToBlobAndIndex(docs[i]);
+					} catch (e){
+						cb(e);
+						return;
+					}
+					blobs[i] = blobAndIndex.b;
+					indices[i] = blobAndIndex.i;
+					ttlArray[i] = blobAndIndex.t || ttl;
 				}
 
-				self.__bulkSave(blobs, indices, cb, overwrite, ttl);
+				self.__bulkSave(blobs, indices, cb, overwrite, ttlArray);
 			};
 
 			this.__bulkSave = function(blobs, indices, cb, overwrite, ttl){
