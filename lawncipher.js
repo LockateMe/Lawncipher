@@ -1070,7 +1070,7 @@
 									index = {};
 									blob = doc;
 									var indexAttributes = Object.keys(indexModel);
-									for (var i = 0; indexAttributes.length; i++){
+									for (var i = 0; i < indexAttributes.length; i++){
 										index[indexAttributes[i]] = doc[indexAttributes[i]];
 									}
 								} else {

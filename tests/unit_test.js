@@ -104,6 +104,22 @@
 		var collections = {};
 		var docs = {};
 
+		var testModel = {
+			firstName: 'string',
+			lastName: 'string',
+			isFriend: 'boolean',
+			id: {type: 'string', id: true},
+			creationOrder: {type: 'number', unique: true},
+			creationDate: 'date',
+			messages: 'array',
+			status: 'object',
+			notes: '*'
+		};
+
+		//Note that in the test documents below, they all have a 'things' attribute.
+		//That extra attribute (compared to index model above), will cause Lawncipher
+		//to store a blob (in addition to the data that fit in the indexModel)
+
 		var userA = {
 			firstName: 'A',
 			lastName: 'B',
@@ -192,7 +208,7 @@
 			},
 			{
 				message: 'Saving a doc',
-				index: {sender: 'me', receiver: 'me', message: 'forever alone'},
+				doc: {__index: {sender: 'me', receiver: 'me', message: 'forever alone'}},
 				collectionName: 'pass_test_collection'
 			},
 			{
@@ -279,7 +295,7 @@
 			},*/
 			{
 				message: 'Saving a blob',
-				blob: 'Hello world',
+				doc: 'Hello world',
 				collectionName: 'test_nomodel_collection'
 			},
 			/*{
@@ -289,7 +305,7 @@
 			},*/
 			{
 				message: 'Saving an index doc',
-				index: {identifier: 'meh', purpose: 'Testing this stuff'},
+				doc: {__index: {identifier: 'meh', purpose: 'Testing this stuff'}},
 				collectionName: 'test_nomodel_collection'
 			},
 			/*{
@@ -299,34 +315,38 @@
 			},*/
 			{
 				message: 'Saving an index doc',
-				index: {identifier: 'doc1', purpose: 'Testing this stuff, again'},
+				doc: {__index: {identifier: 'doc1', purpose: 'Testing this stuff, again'}},
 				collectionName: 'test_nomodel_collection'
 			},
 			{
 				message: 'Saving an index doc',
-				index: {identifier: 'doc2', purpose: 'Testing this stuff, a third time'},
+				doc: {__index: {identifier: 'doc2', purpose: 'Testing this stuff, a third time'}},
 				collectionName: 'test_nomodel_collection'
 			},
 			{
 				message: 'Saving an index doc',
-				index: {identifier: 'doc2', identifier2: 'compound', purpose: 'Testing this stuff. Compound queries and stuff'},
+				doc: {__index: {identifier: 'doc2', identifier2: 'compound', purpose: 'Testing this stuff. Compound queries and stuff'}},
 				collectionName: 'test_nomodel_collection'
 			},
 			{
 				message: 'Saving an index doc',
-				index: {identifier: 'doc2', identifier2: 'compound', purpose: 'Testing this stuff. Compound queries and stuff'},
-				collectionName: 'test_nomodel_collection',
-				blob: 'Hello world'
+				doc: {
+					__index: {identifier: 'doc2', identifier2: 'compound', purpose: 'Testing this stuff. Compound queries and stuff'},
+					__blob: 'Hello world'
+				},
+				collectionName: 'test_nomodel_collection'
 			},
 			{
 				message: 'Saving a doc, with index data extraction',
 				collectionName: 'test_nomodel_collection',
-				blob: {
-					identifier: 'doc2',
-					purpose: '#swag #idiot',
-					when: 'tomorrow'
-				},
-				index: ['identifier', 'when']
+				doc: {
+					__blob: {
+						identifier: 'doc2',
+						purpose: '#swag #idiot',
+						when: 'tomorrow'
+					},
+					__index: ['identifier', 'when']
+				}
 			},
 			/*{
 				message: 'Counting items (without query)',
@@ -480,17 +500,21 @@
 				result: []
 			},
 			{
-				message: 'Adding a doc with a ttl',
+				message: 'Adding a doc with a ttl (through __ttl)',
 				collectionName: 'test_nomodel_collection',
-				blob: 'Hello world. It\'s gonna disappear',
-				index: {expires: true},
-				ttl: 4000
+				doc: {
+					__blob: 'Hello world. It\'s gonna disappear',
+					__index: {expires: true},
+					__ttl: 4000
+				},
 			},
 			{
-				message: 'Adding an other doc with a ttl',
+				message: 'Adding an other doc with a ttl (through extra parameter)',
 				collectionName: 'test_nomodel_collection',
-				blob: 'Hello world. This one will disappear as well',
-				index: {expires: true, docId: 2},
+				doc: {
+					__blob: 'Hello world. This one will disappear as well',
+					__index: {expires: true, docId: 2}
+				},
 				ttl: 4000
 			},
 			{
@@ -541,17 +565,7 @@
 			{
 				message: 'Opening a collection',
 				collectionName: 'test_model_collection',
-				indexModel: {
-					firstName: 'string',
-					lastName: 'string',
-					isFriend: 'boolean',
-					id: {type: 'string', id: true},
-					creationOrder: {type: 'number', unique: true},
-					creationDate: 'date',
-					messages: 'array',
-					status: 'object',
-					notes: '*'
-				}
+				indexModel: testModel
 			},
 			{
 				message: 'Listing (one) collection',
@@ -560,26 +574,26 @@
 			{
 				message: 'Saving a doc',
 				collectionName: 'test_model_collection',
-				blob: userA,
-				index: ['firstName', 'lastName', 'isFriend', 'id', 'creationOrder', 'creationDate', 'messages', 'status', 'notes']
+				doc: userA//,
+				//index: ['firstName', 'lastName', 'isFriend', 'id', 'creationOrder', 'creationDate', 'messages', 'status', 'notes']
 			},
 			{
 				message: 'Saving a doc',
 				collectionName: 'test_model_collection',
-				blob: userB,
-				index: ['firstName', 'lastName', 'isFriend', 'id', 'creationOrder', 'creationDate', 'messages', 'status', 'notes']
+				doc: userB//,
+				//index: ['firstName', 'lastName', 'isFriend', 'id', 'creationOrder', 'creationDate', 'messages', 'status', 'notes']
 			},
 			{
 				message: 'Saving a doc',
 				collectionName: 'test_model_collection',
-				blob: userC,
-				index: ['firstName', 'lastName', 'isFriend', 'id', 'creationOrder', 'creationDate', 'messages', 'status', 'notes']
+				doc: userC//,
+				//index: ['firstName', 'lastName', 'isFriend', 'id', 'creationOrder', 'creationDate', 'messages', 'status', 'notes']
 			},
 			{
 				message: 'Saving a doc',
 				collectionName: 'test_model_collection',
-				blob: userD,
-				index: ['firstName', 'lastName', 'isFriend', 'id', 'creationOrder', 'creationDate', 'messages', 'status', 'notes']
+				doc: userD//,
+				//index: ['firstName', 'lastName', 'isFriend', 'id', 'creationOrder', 'creationDate', 'messages', 'status', 'notes']
 			},
 			{
 				message: 'Looking for the modelled doc (by id)',
@@ -867,6 +881,23 @@
 		}
 
 		function test_save(next){
+			var _params = getParams();
+			var collectionName = _params.collectionName;
+			var doc = _params.doc;
+			collections[collectionName].save(doc, function(err, id){
+				if (err){
+					next(err);
+					return;
+				}
+				if (!id) throw new Error('id cannot be undefined!');
+				console.log('New docId: ' + id);
+				if (!docs[collectionName]) docs[collectionName] = [id];
+				else docs[collectionName].push(id);
+				next();
+			}, _params.overwrite, _params.ttl);
+		}
+
+		function test_old_save(next){
 			var _params = getParams();
 			var collectionName = _params.collectionName;
 			var blob = _params.blob;
