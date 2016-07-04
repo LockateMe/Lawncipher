@@ -3405,6 +3405,27 @@
 					return;
 				}
 
+				if (!fileData){
+					err = 'fileData is not defined';
+					console.error(err);
+					_cb(err);
+					return;
+				}
+
+				if (!(fileData instanceof Uint8Array || Buffer.isBuffer(fileData))){
+					err = 'fileData is of invalid type';
+					console.error(err);
+					_cb(err);
+					return;
+				}
+
+				if (fileData.length == 0){
+					err = 'fileData happens to be empty!';
+					console.error(err);
+					_cb(err);
+					return;
+				}
+
 				fileData = checkReadBuffer(fileData);
 
 				var fragmentPlainText = scryptFileDecode(fileData, collectionKey);
