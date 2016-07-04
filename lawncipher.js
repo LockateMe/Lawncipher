@@ -1087,6 +1087,14 @@
 				};
 			}
 
+			self.getIndexModel = function(){
+
+			};
+
+			self.setIndexModel = function(){
+
+			};
+
 			this.save = function(doc, cb, overwrite, ttl, doNotWriteIndex){
 				if (typeof cb != 'function') throw new TypeError('callback must be a function');
 
@@ -3086,7 +3094,7 @@
 		var fragmentsLRU = new LRUStringSet();
 
 		var theHasher = PearsonHasher(pearsonSeed);
-		var theTree = new PearsonBPlusTree(_maxNodeSize || 53248, theHasher, !attributeIndex); //Key collisions are disallowed on attribute/searchIndex
+		var theTree = new PearsonBPlusTree(theHasher, _maxNodeSize || 53248, !attributeIndex); //Key collisions are disallowed on attribute/searchIndex
 
 		var hashToLong = function(s){
 			return bufferBEToLong(theHasher(s));
@@ -3633,11 +3641,11 @@
 	* -central collection index. Key : docId. Value : document
 	* -search tree for an attribute in the index model. Key : attributeValue. Value : matching docIDs
 	*/
-	function PearsonBPlusTree(maxBinWidth, hasher, disallowKeyCollisions){
-		//Maximum size of a bin. Ideally this number should represent the size of the data to be held by a single index fragment file
-		if (maxBinWidth && !(typeof maxBinWidth == 'number' && Math.floor(maxBinWidth) == maxBinWidth && maxBinWidth > 0)) throw new TypeError('when defined, maxBinWidth must be a strictly positive integer');
+	function PearsonBPlusTree(hasher, maxBinWidth, disallowKeyCollisions){
 		//The function retruned from PearsonHasher()
 		if (typeof hasher != 'function') throw new TypeError('hasher must be a function');
+		//Maximum size of a bin. Ideally this number should represent the size of the data to be held by a single index fragment file
+		if (maxBinWidth && !(typeof maxBinWidth == 'number' && Math.floor(maxBinWidth) == maxBinWidth && maxBinWidth > 0)) throw new TypeError('when defined, maxBinWidth must be a strictly positive integer');
 
 		maxBinWidth = maxBinWidth || 53248; // 13 * 4096 (hoping to match 4096 block sizes)
 
