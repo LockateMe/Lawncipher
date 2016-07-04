@@ -659,11 +659,14 @@
 		/**
 		* Getting an existing collection, or creating one
 		* @param {String} name - the collection's name
-		* @param {Object|Array<String>} [_indexModel] - the index model. The attributes that will be extracted and/or saved in the collection's _index file. The query-able data. If the collection already exists, this parameter will simply be ignored. Optional parameter.
 		* @param {Function} _callback - callback function, receiving errors or the constructed Collection object (err, collection)
+		* @param {Object|Array<String>} [_indexModel] - the index model. The attributes that will be extracted and/or saved in the collection's _index file. The query-able data. If the collection already exists, this parameter will simply be ignored. Optional parameter.
 		*/
-		this.collection = function(name, _indexModel, _callback){
+		this.collection = function(name, _callback, _indexModel){
 			if (typeof name != 'string') throw new TypeError('name must be a string');
+
+			if (typeof _callback == 'function' && typeof _indexModel != 'function') callback = _callback;
+			if (!callback) throw new TypeError('callback must be a function');
 
 			//Possibility to skip the _index model parameter. Testing types to find the mandatory callback
 			var indexModel, callback;
@@ -672,18 +675,49 @@
 			} else if (typeof _indexModel == 'object'){
 				indexModel = _indexModel;
 			}
-			if (typeof _callback == 'function' && typeof _indexModel != 'function') callback = _callback;
-			if (!callback) throw new TypeError('callback must be a function');
 
 			if (!lc.isOpen()){
 				callback(new Error('lawncipher is not open yet'));
 				return;
 			}
 
-			var c = new Collection(name, indexModel, callback);
-			openCollections.push(c);
+			if (!indexModel){
+				var c = new Collection(name, callback);
+				openCollections.push(c);
 
-			return c; //Returning the new Collection object, that will call the `callback` as well. If the returned lawncipher instance is used before the callback is executed, race condition guaranteed.
+				/*
+				* Returning the new Collection object, that will call
+				* the `callback` as well. If the returned lawncipher
+				* instance is used before the callback is executed, race
+				* condition guaranteed.
+				*/
+				return c;
+			} else {
+				/*
+				* After the collection is loaded, the indexModel is set.
+				* The callback is called once the indexModel has been set
+				* Note that the callback can then receive the errors of
+				* collection loading and setIndexModel
+				*/
+				var c = new Collection(name, function(err, _collection){
+					if (err){
+						callback(err);
+						return;
+					}
+
+					_collection.setIndexModel(indexModel, function(err){
+						if (err){
+							callback(err, _collection);
+							return;
+						}
+
+						callback(undefined, _collection);
+					});
+				});
+				openCollections.push(c);
+
+				return c; //Returning the new Collection object, that will call the `callback` as well. If the returned lawncipher instance is used before the callback is executed, race condition guaranteed.
+			}
 		};
 
 		/**
@@ -757,25 +791,18 @@
 		* @constructor
 		* @private
 		* @param {String} name - collection name. If a collection with this name already exists, it is loaded. Otherwise, a new collection will be created, using the current rootKey.
-		* @param {Object|Array<String>} indexModel - the document model to be used for this collection. This parameter is ignored if the collection already exists.
 		* @param {Function} cb - callback function receiving (err, collection). File, format and rootKey errors can occur.
 		*/
-		function Collection(name, indexModel, cb){
+		function Collection(name, cb){
 			var k; //The collection's main encryption key
 			var self = this;
-			indexModel = indexModel && clone(indexModel);
 			var collectionName = name;
-			var collectionIndexModel = indexModel;
+			var collectionIndexModel;
 			var docCount = 0;
 			var collectionSize = 0;
 			var collectionIndexSize = 0;
 
 			var purgeInterval, purgeOngoing = false;
-
-			if (collectionIndexModel && validateIndexModel(collectionIndexModel)){
-				cb('Invalid descripton for index field ' + validateIndexModel(collectionIndexModel));
-				return;
-			}
 
 			var collectionDescription; //The object to be added to the collection list, describing the current collection
 			var collectionPath = pathJoin(rootPath, collectionName); //Root directory of the collection
@@ -797,12 +824,14 @@
 			}
 
 			if (!collectionDescription){
+				//If collectionDescription doesn't exist,
+				//it means that this current collection is new and empty
 				collectionDescription = {
 					name: collectionName,
 					key: to_hex(randomBuffer(32))
 				};
 
-				if (collectionIndexModel) collectionDescription.indexModel = clone(collectionIndexModel)
+				//if (collectionIndexModel) collectionDescription.indexModel = clone(collectionIndexModel)
 
 				rootIndex.push(collectionDescription);
 				saveRootIndex(function(err){
@@ -865,7 +894,7 @@
 							}
 
 							var newMetaIndex = clone(collectionMetaFileModel);
-							if (indexModel) newMetaIndex.indexModel = indexModel;
+							//if (indexModel) newMetaIndex.indexModel = indexModel;
 
 							indexesSeeds = {_index: PearsonSeedGenerator()};
 							newMetaIndex.indexesSeeds = indexesSeeds;
@@ -1087,11 +1116,51 @@
 				};
 			}
 
-			self.getIndexModel = function(){
-
+			/*
+			* Methods to manage index models
+			* Practical note : we discourage the use of setIndexModel
+			* on a non-empty collection, especially if it of non-negligeable
+			* size. Such call will force Lawncipher to adapt each and every
+			* document in the colection to the new indexModel
+			*/
+			this.getIndexModel = function(){
+				return indexModel && clone(indexModel);
 			};
 
-			self.setIndexModel = function(){
+			/**
+			* Set the indexModel for this collection. To be preferably called right after the collection's creation
+			* @param {Object|Array<String>} indexModel - the document model to be used for this collection.
+			* @param {Function} callback - the callback function, that gets called once the indexModel is saved and applied on all the indexed documents of the collection. Receives (err) if an error occurred
+			*/
+			this.setIndexModel = function(indexModel, cb){
+				if (typeof indexModel != 'object') throw new TypeError('indexModel must be an object');
+				if (typeof callback != 'function') throw new TypeError('callback must be an object');
+
+				var validationResult = validateIndexModel(indexModel);
+				if (validationResult){
+					cb('Invalid description for index field ' + validationResult);
+					return;
+				}
+
+				//Adapt docs, in a "rollback"-able manner
+
+				//Save model as part of collection meta
+				collectionMeta.indexModel = indexModel;
+				saveMetaIndex(function(err){
+					if (err){
+						cb(err);
+						return;
+					}
+
+					//Save model as part of root Lawncipher index
+					collectionDescription.indexModel = clone(collectionIndexModel);
+					saveRootIndex(function(err){
+						cb(err);
+					});
+				});
+			};
+
+			this.clearIndexModel = function(cb){
 
 			};
 
@@ -1167,9 +1236,9 @@
 						//Cloning in data so we can make sure that saved and re-saved docs aren't altered by modifications on the original indexData
 					}
 
-					if (indexModel){
+					if (collectionIndexModel){
 						//Validation of index data against the model
-						var validationResult = validateIndexAgainstModel(indexData, indexModel);
+						var validationResult = validateIndexAgainstModel(indexData, collectionIndexModel);
 						if (typeof validationResult == 'string' || !validationResult){ //In case a field name or nothing is returned by the validation, error
 							console.error('validationResult: ' + JSON.stringify(validationResult));
 							cb('INVALID_INDEX_DATA');
@@ -1181,13 +1250,13 @@
 						//Using the validated data as indexData
 						//Meaning that, when you use a model, docs that have extra-model attributes will have them removed in the db
 						indexData = validationResult;
-						var indexFields = Object.keys(indexModel);
+						var indexFields = Object.keys(collectionIndexModel);
 						var idField = null, uniqueFields = [];
 						for (var i = 0; i < indexFields.length; i++){
-							if (indexModel[indexFields[i]].id){
+							if (collectionIndexModel[indexFields[i]].id){
 								if (!idField) idField = indexFields[i];
 							}
-							if (indexModel[indexFields[i]].unique){
+							if (collectionIndexModel[indexFields[i]].unique){
 								uniqueFields.push(indexFields[i]);
 							}
 						}
@@ -1414,7 +1483,6 @@
 						return;
 					}
 
-					var indexModel = collectionMeta.indexModel;
 					var docIndex = 0;
 
 					processOne();
@@ -1463,8 +1531,8 @@
 								}
 
 								//If there is a model, validate against it
-								if (indexModel){
-									var validatedIndexData = validateIndexAgainstModel(newIndexData, indexModel);
+								if (collectionIndexModel){
+									var validatedIndexData = validateIndexAgainstModel(newIndexData, collectionIndexModel);
 									if (typeof validatedIndexData == 'string' || !validatedIndexData){
 										next('INVALID_INDEX_DATA');
 										return;
@@ -1472,13 +1540,13 @@
 									newIndexData = validatedIndexData;
 
 									//Extracted supposed id and unique fields
-									var indexFields = Object.keys(indexModel);
+									var indexFields = Object.keys(collectionIndexModel);
 									var idField = null, uniqueFields = [];
 									for (var i = 0; i < indexFields.length; i++){
-										if (indexModel[indexFields[i]].id){
+										if (collectionIndexModel[indexFields[i]].id){
 											if (!idField) idField = indexFields[i];
 										}
-										if (indexModel[indexFields[i]].unique){
+										if (collectionIndexModel[indexFields[i]].unique){
 											uniqueFields.push(indexFields[i]);
 										}
 									}
