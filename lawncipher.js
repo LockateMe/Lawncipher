@@ -3258,14 +3258,20 @@
 						return;
 					}
 
-					loadIndexFragment(currentRange, function(err, receiverNode){
-						if (err){
-							cb(err);
-							return;
-						}
+					if (currentLoadedFragmentsRange[currentRange.toString()]){
+						//The next range is already loaded in memory
+						var currentNode = theTree.lookupRange(currentRange);
+						cb(null, currentNode);
+					} else {
+						loadIndexFragment(currentRange, function(err, receiverNode){
+							if (err){
+								cb(err);
+								return;
+							}
 
-						cb(null, receiverNode);
-					});
+							cb(null, receiverNode);
+						});
+					}
 				};
 
 				this.hasNext = function(){
@@ -3391,6 +3397,7 @@
 		}
 
 		function loadIndexFragment(fRange, _cb){
+			console.log('Loading range ' + fRange.toString())
 			var fileName = pathJoin(collectionPath, fragmentNameBuilder(fRange));
 			fs.readFile(fileName, function(err, fileData){
 				if (err){
@@ -3448,6 +3455,8 @@
 				return;
 			}
 
+			console.log('Unloading ' + fRangeStr);
+
 			var fRange = PearsonRange.fromString(fRangeStr);
 
 			var freedSize = markUnloadOf(fRange);
@@ -3458,7 +3467,7 @@
 		}
 
 		function saveIndexFragment(fRange, fData, _cb){
-			//console.log('Saving ' + fRange.toString());
+			console.log('Saving ' + fRange.toString());
 			var fileName = pathJoin(collectionPath, fragmentNameBuilder(fRange));
 
 			var fragmentPlainText = from_string(JSON.stringify(serializeObject(fData)));
@@ -3467,6 +3476,7 @@
 			fragmentCipherText = checkWriteBuffer(fragmentCipherText);
 
 			fs.writeFile(fileName, fragmentCipherText, function(err){
+				console.log('End of save of ' + fRange.toString());
 				if (err){
 					if (_cb) _cb(err);
 					else throw err;
@@ -3949,11 +3959,11 @@
 			return rootNode.lookup(key, hash);
 		};
 
-		/*self.lookupNodeForRange = function(fRange){
+		self.lookupRange = function(fRange){
 			if (!(fRange instanceof PearsonRange)) throw new TypeError('fRange must be a PearsonRange');
 
-			return rootNode.lookupNodeForRange(fRange);
-		};*/
+			return rootNode.lookupRange(fRange);
+		};
 
 		/*self.getDistribution = function(){
 
@@ -4185,17 +4195,19 @@
 				}
 			};
 
-			/*thisNode.lookupNodeForRange = function(fRange){
+			thisNode.lookupRange = function(fRange){
 				if (thisNode.isLeaf()){
 					return thisNode;
 				} else {
 					if (left.range().contains(fRange)){
 						return left.lookupNodeForRange(fRange);
-					} else {
+					} else if (right.range().contains(fRange)) {
 						return right.lookupNodeForRange(fRange);
+					} else {
+						return null; //No node cannot be found bearing the exact fRange
 					}
 				}
-			};*/
+			};
 
 			/**
 			* Get data range of tree node
