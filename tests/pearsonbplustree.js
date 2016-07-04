@@ -41,6 +41,10 @@ function newRandomUserDoc(){
 	};
 }
 
+function newLightValue(){
+	return faker.random.number();
+}
+
 function logChange(dRange, data){
 	console.log('[change ' + dRange.toString() + '] ' + JSON.stringify(data));
 }
@@ -77,7 +81,7 @@ function basicTests(){
 
 	console.log('Testing while disallowing key collisions');
 
-	var testTree = new PearsonBPlusTree(undefined, ph, true);
+	var testTree = new PearsonBPlusTree(ph, undefined, true);
 
 	testTree.on('change', logChange);
 	testTree.on('delete', logDelete);
@@ -104,7 +108,7 @@ function basicTests(){
 
 	console.log('Testing while allowing key collisions');
 
-	testTree = new PearsonBPlusTree(undefined, ph, false);
+	testTree = new PearsonBPlusTree(ph, undefined, false);
 
 	testTree.on('change', logChange);
 	testTree.on('delete', logDelete);
@@ -134,30 +138,28 @@ function loadTests(docCount){
 
 	var ph = PearsonHasher(testSeed);
 
-	var testTree = new PearsonBPlusTree(1000, ph, true);
+	var testTree = new PearsonBPlusTree(ph, 1000, true);
 
 	testTree.on('change', logChangeWithoutData);
 	testTree.on('delete', logDelete);
 
-	var futureLookups = [];
-	var dataSet = [];
+	var dataSet = new Array(docCount);
 
 	for (var i = 0; i < docCount; i++){
 		var tuple = {k: faker.random.uuid(), v: newRandomUserDoc()};
-		dataSet.push(tuple);
-		if (i % 10 == 0){
-			futureLookups.push(tuple);
-		}
+		dataSet[i] = tuple;
 		testTree.add(tuple.k, tuple.v);
 	}
 
-	for (var i = 0; i < futureLookups.length; i++){
-		assert(deepObjectEquality(testTree.lookup(futureLookups[i].k), futureLookups[i].v));
+	for (var i = 0; i < dataSet.length; i+=10){
+		assert(deepObjectEquality(testTree.lookup(dataSet[i].k), dataSet[i].v));
 	}
 
 	for (var i = 0; i < dataSet.length; i++){
 		testTree.remove(dataSet[i].k);
 	}
+
+	dataSet = null;
 }
 
 function postponingEventsTests(docCount){
@@ -167,27 +169,23 @@ function postponingEventsTests(docCount){
 
 	var ph = PearsonHasher(testSeed);
 
-	var testTree = new PearsonBPlusTree(1000, ph, true);
+	var testTree = new PearsonBPlusTree(ph, 1000, true);
 
 	testTree.on('change', logChangeWithoutData);
 	testTree.on('delete', logDelete);
 
-	var futureLookups = [];
-	var dataSet = [];
+	var dataSet = new Array(docCount);
 
 	console.log('---START OF ADDITIONS---');
 	for (var i = 0; i < docCount; i++){
 		var tuple = {k: faker.random.uuid(), v: newRandomUserDoc()};
-		dataSet.push(tuple);
-		if (i % 10 == 0){
-			futureLookups.push(tuple);
-		}
+		dataSet[i] = tuple;
 		testTree.add(tuple.k, tuple.v, i < docCount - 1 ? true : false); //noTrigger == false for last the tuple only
 	}
 	console.log('---END OF ADDITIONS---');
 
-	for (var i = 0; i < futureLookups.length; i++){
-		assert(deepObjectEquality(testTree.lookup(futureLookups[i].k), futureLookups[i].v));
+	for (var i = 0; i < dataSet.length; i+=10){
+		assert(deepObjectEquality(testTree.lookup(dataSet[i].k), dataSet[i].v));
 	}
 
 	console.log('---START OF REMOVALS---');
@@ -195,6 +193,45 @@ function postponingEventsTests(docCount){
 		testTree.remove(dataSet[i].k, undefined, i < dataSet.length - 1 ? true : false); //noTrigger == false for the last tuple only
 	}
 	console.log('---END OF REMOVALS---');
+
+	dataSet = null;
+}
+
+function largeTreeTest(docCount){
+	docCount = docCount || 10000;
+
+	var testSeed = PearsonSeedGenerator();
+
+	var ph = PearsonHasher(testSeed);
+
+	var testTree = new PearsonBPlusTree(ph, undefined, true);
+
+	testTree.on('change', logChangeWithoutData);
+	testTree.on('delete', logDelete);
+
+	var dataSet = new Array(docCount);
+
+	console.log('---START OF ADDITIONS---');
+	for (var i = 0; i < docCount; i++){
+		var tuple = {k: faker.random.uuid(), v: newLightValue()};
+		dataSet[i] = tuple;
+		testTree.add(tuple.k, tuple.v, i < docCount - 1 ? true : false);
+	}
+	console.log('---END OF ADDITIONS---');
+
+	console.log('---START OF LOOKUPS---');
+	for (var i = 0; i < dataSet.length; i++){
+		assert(deepObjectEquality(testTree.lookup(dataSet[i].k), dataSet[i].v));
+	}
+	console.log('---END OF LOOKUPS---');
+
+	console.log('---START OF REMOVALS---');
+	for (var i = 0; i < dataSet.length; i++){
+		testTree.remove(dataSet[i].k, undefined, i < dataSet.length - 1 ? true : false);
+	}
+	console.log('---END OF REMOVALS---');
+
+	dataSet = null;
 }
 
 console.log('----------------------');
@@ -204,18 +241,15 @@ basicTests();
 console.log('----------------------');
 console.log('Tree load testing');
 console.log('----------------------');
-if (!runMega){
-	loadTests();
-} else {
-	console.log('Testing the tree with ' + megaDocCount + ' docs');
-	loadTests(megaDocCount);
-}
+loadTests();
 console.log('----------------------');
 console.log('Postponed events testing');
 console.log('----------------------');
-if (!runMega){
-	postponingEventsTests();
-} else {
-	console.log('Testing the tree with ' + megaDocCount + ' docs (with postponed events)');
-	postponingEventsTests(megaDocCount);
+postponingEventsTests();
+
+if (runMega){
+	console.log('----------------------');
+	console.log('Tree size stress test');
+	console.log('----------------------');
+	largeTreeTest(megaDocCount);
 }
