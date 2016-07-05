@@ -1176,15 +1176,26 @@
 
 						//Save model as part of root Lawncipher index
 						collectionDescription.indexModel = clone(collectionIndexModel);
-						saveRootIndex(function(err){
-							cb(err);
-						});
+						saveRootIndex(cb);
 					});
 				}
 			};
 
 			this.clearIndexModel = function(cb){
+				if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
+				collectionIndexModel = null;
+				collectionMeta.indexModel = null;
+				collectionDescription.indexModel = null;
+
+				saveMetaIndex(function(err){
+					if (err){
+						cb(err);
+						return;
+					}
+
+					saveRootIndex(cb);
+				});
 			};
 
 			this.save = function(doc, cb, overwrite, ttl, doNotWriteIndex){
