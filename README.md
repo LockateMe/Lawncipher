@@ -216,30 +216,40 @@ Deleting an existing collection. Note that this operation once invoked cannot be
 * `String collectionName` : the name of the collection to be deleted
 * `Function callback` : the callback function, receiving `(err)`, a string briefly describing the error, if one occurred
 
-### `Collection.save(blob, index, cb, overwrite, ttl)`
-Save a document/blob in the current collection
-* `Object|String|Uint8Array blob` : the raw document to be saved as an independent encrypted (un-query-able) file. Optional parameter
-* `Object|Array<String> index` : index data. The qurey-able data for the document to be saved. A standard JS object. Can also be an array of strings in case blob is a standard JS object; the array indicates the names of the fields to be extracted from the blob and to be saved in the index
+### `Collection.save(doc, cb, [overwrite], [ttl])`
+Save a document/blob in the current collection.
+* `Doc doc` : The document to be saved.  
+`Doc` is either of type `String`, `Uint8Array` or `Object`.  
+If it is a `String` or a `Uint8Array` or an `Array`, it is saved as a blob, and it is only retrievable with the docId passed in the callback `cb` function.  
+If it is an `Object`, there are two modes available:  
+  - Explicit mode: tell Lawncipher what is to be stored as blob (the value of the `__blob` attribute), what to be stored as index data (the value of the `__index` attribute), and what is the doc's TTL. When using that mode, at least one of `__index` and `__blob` must be defined. `__ttl` is optional. Example `doc`:
+```js
+{__blob: 'Hello world', __index: {attr1: value1, attr2: value2, ...}, __ttl: 5000}
+```
+  - Implicit mode: Lawncipher determines what needs to be stored where, based on the indexModel.  
+    If the `doc` has no extraneous attributes (compared to the indexModel), then it is stored as indexData only.  
+    If the `doc` has extraneous attributes (compared to the indexModel), then it is stored as both indexData and blob, where the blob would hold the document with the extraneous attributes (that cannot fit in the indexModel)  
+    __NOTE:__ If the collection has no indexModel, then the `doc` is stored as a blob as is only retrievable by its docId  
+    __NOTE:__ Index data cannot BE an array (at the highest level). However, index data can contain arrays as the value of attributes. If `doc` turns out to be an array, it is stored as a blob without index data and will be retrievable with its docId only
 * `Function cb` : callback function. Receiving `(err, docId)`, where `err` is a string briefly describing the error, if one occurred; and `docId` is the Id attributed to the saved document.
 * `Boolean overwrite` : a boolean indicating whether this new document can overwrite an other that uses the same ID. Optional parameter.
-* `Number|Date ttl` : TTL for the document (in milliseconds) or date of expiry. Optional parameter.
+* `Number|Date ttl` : "Time To Live" (TTL) for the document (in milliseconds) or date of expiry. Note that this parameter is overridden if the explicit mode is used and a `__ttl` attribute is passed to the method. Optional parameter.
 
-### `Collection.bulkSave(blobs, indices, cb, overwrite, ttls)`
-Save a list of documents/blobs in the current collection. Note that when provided as arrays, `blobs`, 'indices' and `ttls` must have the same length. There must be also an index correspondence (ie, blobs[0] and indices[0] and ttls[0] will correspond to the same doc when saved)
-* `Array<Object|String|Uint8Array> blobs` : the list of documents to be saved in the collection
-* `Array<Object|Array<String>> indices` : the list of query-able index data to be saved in the collection
+### `Collection.bulkSave(docs, cb, [overwrite], [ttls])`
+Save a list of documents/blobs in the current collection. Note that when `ttls` is provided as an array, it must have the same length as `docs`. (ttls[0] will be used docs[0], ttls[1] for docs[1], and so on...)
+* `Array<Doc> docs` : the list of documents to be saved (see the documentation of `collection.save()` to understand what is `Doc`)
 * `Function cb` : callback function. Receiving `(err, docIDs)`, where `err` is a string or an `Error`-related object, if an error occurred, and `docIDs` is the array of IDs attributed to the documents that have been saved the call (with the same index correspondence).
 * `Boolean overwrite` : a boolean telling whether existing docs can be overwritten.
 * `Number|Date|Array<Number|Date> ttls` : a TTL value, or an array with TTL values
 
-### `Collection.update(q, newData, callback, indexOnly)`
+### `Collection.update(q, newData, callback, [indexOnly])`
 Update a existing documents (index or blob data)
 * `String|Object q` : query. Must either be an object (compound query) or a string (docId)
 * `Object|String|Uint8Array newData` : the data that will be used to update/replace the matched documents
 * `Function callback` : callback function. Receiving `(err, updatedCount)`, where `err` is a string briefly describing the error, if one occured; and updatedCount is the number of documents that have been updated
 * `Boolean indexOnly` : if an updated doc has a JSON blob and indexData, this parameter ensures that only the index will be updated with `newData`.
 
-### `Collection.find(q, cb, limit)`
+### `Collection.find(q, cb, [limit])`
 Find documents in the current collection. If a matched document doesn't have blob, its index data is returned.
 * `String|Object q` : query. Must either be an object (compound query) or a string (docId)
 * `Function cb(err, docs)` : callback function. Receives the matched docs or the error that occurred
@@ -278,6 +288,22 @@ Get the TTLs of the documents matched by the query `q`. Results is a hash<docId,
 ### `Collection.close()`
 Close, if open, the current collection
 
+### `Collection.__save(blob, index, cb, overwrite, ttl)`
+Save a document/blob in the current collection. Prior to Lawncipher v2, this method (with the same parameters) was named `save`
+* `Object|String|Uint8Array blob` : the raw document to be saved as an independent encrypted (un-query-able) file. Optional parameter
+* `Object|Array<String> index` : index data. The qurey-able data for the document to be saved. A standard JS object. Can also be an array of strings in case blob is a standard JS object; the array indicates the names of the fields to be extracted from the blob and to be saved in the index
+* `Function cb` : callback function. Receiving `(err, docId)`, where `err` is a string briefly describing the error, if one occurred; and `docId` is the Id attributed to the saved document.
+* `Boolean overwrite` : a boolean indicating whether this new document can overwrite an other that uses the same ID. Optional parameter.
+* `Number|Date ttl` : TTL for the document (in milliseconds) or date of expiry. Optional parameter.
+
+### `Collection.__bulkSave(blobs, indices, cb, overwrite, ttls)`
+Save a list of documents/blobs in the current collection. Note that when provided as arrays, `blobs`, 'indices' and `ttls` must have the same length. There must be also an index correspondence (ie, blobs[0] and indices[0] and ttls[0] will correspond to the same doc when saved). Prior to Lawncipher v2, this method (with the same parameters) was named `bulkSave`
+* `Array<Object|String|Uint8Array> blobs` : the list of documents to be saved in the collection
+* `Array<Object|Array<String>> indices` : the list of query-able index data to be saved in the collection
+* `Function cb` : callback function. Receiving `(err, docIDs)`, where `err` is a string or an `Error`-related object, if an error occurred, and `docIDs` is the array of IDs attributed to the documents that have been saved the call (with the same index correspondence).
+* `Boolean overwrite` : a boolean telling whether existing docs can be overwritten.
+* `Number|Date|Array<Number|Date> ttls` : a TTL value, or an array with TTL values
+
 __About compound queries__
 It works a bit like in MongoDB:
 * If you want a doc/docs that has a `field1` with `value1`, then the compound query should be `{field1: value1}`
@@ -296,7 +322,7 @@ Lawncipher checks for expired docs every 5 seconds
 
 ```
 [
- 	{name: 'collection_name', key: ''},
+ 	{name: 'collection_name', key: '', indexModel: {}},
  	...
 ]
 ```
@@ -321,6 +347,16 @@ __NOTE:__ the `documents` attribute in the model above is removed as soon as the
 
 ### Collection index fragment file model:
 
+An index fragment file name is built as follows :  
+`_`|indexName|`_`|rangePoint1|`_`|rangePoint2
+
+Where:
+* `|` is the concatenation operator
+* `indexName` is `index` for the collection's main index, or is `_`|`attributeName` for an attribute/search index
+* `rangePoint1` and `rangePoint2` are `rangePoint`s, where a `rangePoint` is a big-endian hexadecimal representation of 64 bit unsigned integer and `rangePoint1 <= rangePoint2`
+
+The plaintext contents (before encryption) of an index fragment are:
+
 ```
 {
     docId: documentIndexObject,
@@ -341,17 +377,17 @@ The object that describes a document in the index
 }
 ```
 
-### Document model (`indexModel`):
+### Document/index model (`indexModel`):
 
 Two versions possible:
 * You provide an object describing field to be extracted/provided by the user, to be inserted in the index file of the collection. You can define which field values must be unique and which one will be chosen as docId
-* You provide an array of string, where each string is a field name. Each field will be extracted from the document on insertion. Note that with this method, you cannot choose which field must have unique values nor can you set the document ID (a random one will be generated)
+* You provide an array of strings, where each string is a field name. Each field will be extracted from the document on insertion. Note that with this method, you cannot choose which field must have unique values nor can you set the document ID (a random one will be generated)
 
 `indexModel` object:
 
 ```
 {
-	fieldName: {type: 'typeName', unique: true||false, id: true||false},
+	fieldName: {type: 'typeName', unique: true||false, id: true||false, index: true||false},
 	...
 }
 ```
