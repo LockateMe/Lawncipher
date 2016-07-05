@@ -662,11 +662,10 @@
 		* @param {Function} _callback - callback function, receiving errors or the constructed Collection object (err, collection)
 		* @param {Object|Array<String>} [_indexModel] - the index model. The attributes that will be extracted and/or saved in the collection's _index file. The query-able data. If the collection already exists, this parameter will simply be ignored. Optional parameter.
 		*/
-		this.collection = function(name, _callback, _indexModel){
+		this.collection = function(name, callback, _indexModel){
 			if (typeof name != 'string') throw new TypeError('name must be a string');
 
-			if (typeof _callback == 'function' && typeof _indexModel != 'function') callback = _callback;
-			if (!callback) throw new TypeError('callback must be a function');
+			if (typeof callback != 'function') throw new TypeError('callback must be a function');
 
 			//Possibility to skip the _index model parameter. Testing types to find the mandatory callback
 			var indexModel, callback;
