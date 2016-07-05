@@ -8,7 +8,6 @@ stages:
 check_v0_10:
   script:
     - "cd tests && ./test_all.sh"
-    - "node pearsonbplustree.js mega 1000000"
   stage: test
   tags:
     - v0_10
@@ -16,7 +15,6 @@ check_v0_10:
 check_v5:
   script:
     - "cd tests && ./test_all.sh"
-    - "node pearsonbplustree.js mega 1000000"
   stage: test
   tags:
     - v5
