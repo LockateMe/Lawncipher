@@ -117,7 +117,7 @@ db.openWithPassword(dbPassword, function(err){
   if (err) throw err;
 
   console.log('Opening collection');
-  db.collection('test_collection', testIndexModel, function(err, theCollection){
+  db.collection('test_collection', function(err, theCollection){
     if (err) throw err;
 
     console.log('Inserting documents');
@@ -128,5 +128,5 @@ db.openWithPassword(dbPassword, function(err){
         db.close();
       });
     });
-  });
+  }, testIndexModel);
 });

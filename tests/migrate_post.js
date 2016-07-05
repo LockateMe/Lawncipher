@@ -135,7 +135,7 @@ db.openWithPassword(dbPassword, function(err){
   if (err) throw err;
 
   console.log('Opening collection');
-  db.collection('test_collection', undefined, function(err, collection){
+  db.collection('test_collection', function(err, collection){
     if (err) throw err;
 
     console.log('Checking docs existence');
@@ -148,7 +148,7 @@ db.openWithPassword(dbPassword, function(err){
         db.openWithPassword(dbPassword, function(err){
           if (err) throw err;
 
-          db.collection('test_collection', undefined, function(err, collection){
+          db.collection('test_collection', function(err, collection){
             console.log('Checking docs existence');
 
             checkChain(collection, function(){
