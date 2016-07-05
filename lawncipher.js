@@ -873,6 +873,7 @@
 								return;
 							}
 
+							collectionIndexModel = collectionMeta.indexModel;
 							indexesSeeds = collectionMeta.indexesSeeds;
 
 							collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, function(loadIndexErr){
@@ -894,7 +895,6 @@
 							}
 
 							var newMetaIndex = clone(collectionMetaFileModel);
-							//if (indexModel) newMetaIndex.indexModel = indexModel;
 
 							indexesSeeds = {_index: PearsonSeedGenerator()};
 							newMetaIndex.indexesSeeds = indexesSeeds;
@@ -932,7 +932,7 @@
 
 			function processInitParams(){
 				//Checking that if an indexModel is provided as a parameter of this call, it hasn't changed with the one already saved on file.
-				if (indexModel && collectionMeta.indexModel){
+				/*if (indexModel && collectionMeta.indexModel){
 					if (!deepObjectEquality(collectionMeta.indexModel, indexModel)){
 						//If it does, update
 						console.log('Updating indexModel of collection ' + collectionName + ' to ' + JSON.stringify(indexModel));
@@ -958,7 +958,9 @@
 				} else {
 					indexModel = collectionMeta.indexModel;
 					endCollectionLoad();
-				}
+				}*/
+
+				endCollectionLoad();
 
 				function endCollectionLoad(){
 					purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue);
@@ -1077,7 +1079,7 @@
 							if (doc.__ttl) ttl = doc.__ttl;
 						} else { //Implicit mode.
 							//But what if there is no index model? Save doc as blob. We are blob-first after all
-							if (!indexModel){
+							if (!collectionIndexModel){
 								blob = doc;
 							} else {
 								//If there are attributes that are not in the index model
@@ -1085,7 +1087,7 @@
 								var hasExtraAttributes = false;
 								var docAttributes = Object.keys(doc);
 								for (var i = 0; i < docAttributes.length; i++){
-									if (!indexModel[docAttributes[i]]){
+									if (!collectionIndexModel[docAttributes[i]]){
 										hasExtraAttributes = true;
 										break;
 									}
@@ -1094,7 +1096,7 @@
 								if (hasExtraAttributes){
 									index = {};
 									blob = doc;
-									var indexAttributes = Object.keys(indexModel);
+									var indexAttributes = Object.keys(collectionIndexModel);
 									for (var i = 0; i < indexAttributes.length; i++){
 										index[indexAttributes[i]] = doc[indexAttributes[i]];
 									}
@@ -1124,17 +1126,18 @@
 			* document in the colection to the new indexModel
 			*/
 			this.getIndexModel = function(){
-				return indexModel && clone(indexModel);
+				return collectionIndexModel && clone(collectionIndexModel);
 			};
 
 			/**
 			* Set the indexModel for this collection. To be preferably called right after the collection's creation
 			* @param {Object|Array<String>} indexModel - the document model to be used for this collection.
 			* @param {Function} callback - the callback function, that gets called once the indexModel is saved and applied on all the indexed documents of the collection. Receives (err) if an error occurred
+			* @param {Boolean} [doNotApplyModel] - a boolean indicating whether the indexModel should or not be applied to documents already in the collection
 			*/
-			this.setIndexModel = function(indexModel, cb){
+			this.setIndexModel = function(indexModel, cb, doNotApplyModel){
 				if (typeof indexModel != 'object') throw new TypeError('indexModel must be an object');
-				if (typeof callback != 'function') throw new TypeError('callback must be an object');
+				if (typeof cb != 'function') throw new TypeError('callback must be an function');
 
 				var validationResult = validateIndexModel(indexModel);
 				if (validationResult){
@@ -1142,22 +1145,43 @@
 					return;
 				}
 
+				//Check whether there is an existing model and whether the provided model is different
+				if (collectionMeta.indexModel && deepObjectEquality(indexModel, collectionMeta.indexModel)){
+					//Do nothing. The model hasn't changed!
+					cb();
+					return;
+				}
+
+				if (doNotApplyModel){
+					saveModel();
+					return;
+				}
 				//Adapt docs, in a "rollback"-able manner
+				/**
+				* How to make it "rollback"-able?
+				*
+				*/
+				console.error('Not yet implemented : apply the new indexModel on existing collection documents')
 
-				//Save model as part of collection meta
-				collectionMeta.indexModel = indexModel;
-				saveMetaIndex(function(err){
-					if (err){
-						cb(err);
-						return;
-					}
+				saveModel();
 
-					//Save model as part of root Lawncipher index
-					collectionDescription.indexModel = clone(collectionIndexModel);
-					saveRootIndex(function(err){
-						cb(err);
+				function saveModel(){
+					//Save model as part of collection meta
+					collectionIndexModel = indexModel;
+					collectionMeta.indexModel = indexModel;
+					saveMetaIndex(function(err){
+						if (err){
+							cb(err);
+							return;
+						}
+
+						//Save model as part of root Lawncipher index
+						collectionDescription.indexModel = clone(collectionIndexModel);
+						saveRootIndex(function(err){
+							cb(err);
+						});
 					});
-				});
+				}
 			};
 
 			this.clearIndexModel = function(cb){
@@ -3415,6 +3439,13 @@
 			var limitReached = false;
 
 			function iterateNode(){
+				/*
+				* Get the data contained in the current tree node.
+				* forQuery indicates whether the the node data should be copied (when forQuery == false) and shouldn't (when forQuery == true)
+				* The data is not copied when forQuery == true, because when forQuery == true it is usually called from Collection.find()
+				* In which case Collection.find() will perform a deep copy of the result set, to "ensure immutability of tree data"
+				* In case !forQuery || forQuery == false, the data should be deep-copied here to still "ensure immutability of tree data"
+				*/
 				var currentSubCollection = currentNode.getBinnedRange(forQuery ? 'none' : 'clone').subCollection;
 
 				if (forQuery){
@@ -3465,7 +3496,7 @@
 		}
 
 		function loadIndexFragment(fRange, _cb){
-			console.log('Loading range ' + fRange.toString())
+			//console.log('Loading range ' + fRange.toString())
 			var fileName = pathJoin(collectionPath, fragmentNameBuilder(fRange));
 			fs.readFile(fileName, function(err, fileData){
 				if (err){
@@ -3482,21 +3513,21 @@
 
 				if (!fileData){
 					err = 'fileData is not defined';
-					console.error(err);
+					//console.error(err);
 					_cb(err);
 					return;
 				}
 
 				if (!(fileData instanceof Uint8Array || Buffer.isBuffer(fileData))){
 					err = 'fileData is of invalid type';
-					console.error(err);
+					//console.error(err);
 					_cb(err);
 					return;
 				}
 
 				if (fileData.length == 0){
 					err = 'fileData happens to be empty!';
-					console.error(err);
+					//console.error(err);
 					_cb(err);
 					return;
 				}
@@ -3535,7 +3566,7 @@
 		}
 
 		function saveIndexFragment(fRange, fData, _cb){
-			console.log('Saving ' + fRange.toString());
+			//console.log('Saving ' + fRange.toString());
 			var fileName = pathJoin(collectionPath, fragmentNameBuilder(fRange));
 
 			var fragmentPlainText = from_string(JSON.stringify(serializeObject(fData)));
@@ -3544,7 +3575,7 @@
 			fragmentCipherText = checkWriteBuffer(fragmentCipherText);
 
 			fs.writeFile(fileName, fragmentCipherText, function(err){
-				console.log('End of save of ' + fRange.toString());
+				//console.log('End of save of ' + fRange.toString());
 				if (err){
 					if (_cb) _cb(err);
 					else throw err;

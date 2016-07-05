@@ -564,12 +564,17 @@
 			},
 			{
 				message: 'Opening a collection',
-				collectionName: 'test_model_collection',
-				indexModel: testModel
+				collectionName: 'test_model_collection'//,
+				//indexModel: testModel
 			},
 			{
 				message: 'Listing (one) collection',
 				result: ['test_model_collection']
+			},
+			{
+				message: 'Setting an index model',
+				collectionName: 'test_model_collection',
+				indexModel: testModel
 			},
 			{
 				message: 'Saving a doc',
@@ -747,6 +752,7 @@
 			test_listCollections,
 			test_collection, //Opening a collection with model
 			test_listCollections,
+			test_setIndexModel,
 			test_save,
 			test_save,
 			test_save,
@@ -857,7 +863,7 @@
 		function test_collection(next){
 			var _params = getParams();
 			var name = _params.collectionName;
-			db.collection(name, _params.indexModel, function(err, c){
+			db.collection(name, function(err, c){
 				if (err) next(err);
 				else {
 					collections[name] = c;
@@ -878,6 +884,26 @@
 			collections[name].close();
 			delete collections[name];
 			next();
+		}
+
+		function test_setIndexModel(next){
+			var _params = getParams();
+			var name = _params.collectionName;
+			collections[name].setIndexModel(_params.indexModel, function(err){
+				if (err){
+					next(err);
+					return;
+				}
+
+				//Checking getIndexModel by the way...
+				var currentModel = collections[name].getIndexModel();
+				if (!deepObjectEquality(_params.indexModel, currentModel)){
+					next('Unexpected indexModel: ' + JSON.stringify(currentModel));
+					return;
+				}
+
+				next();
+			});
 		}
 
 		function test_save(next){
