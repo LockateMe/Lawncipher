@@ -2019,7 +2019,7 @@
 					}
 
 					cb(undefined, sortAndSkipQuery ? applyQuery(sortAndSkipQuery, resultSet, limit, includePureBlobs) : resultSet);
-				}, limit, true);
+				}, limit, true); //true : forQuery. Passes entire leaf data without clone
 			}
 
 			function applyQuery(query, dataset, limit, matchFunction, includePureBlobs){
