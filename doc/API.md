@@ -52,9 +52,9 @@ Save a document/blob in the current collection.
 If it is a `String` or a `Uint8Array` or an `Array`, it is saved as a blob, and it is only retrievable with the docId passed in the callback `cb` function.  
 If it is an `Object`, there are two modes available:  
   - Explicit mode: tell Lawncipher what is to be stored as blob (the value of the `__blob` attribute), what to be stored as index data (the value of the `__index` attribute), and what is the doc's TTL. When using that mode, at least one of `__index` and `__blob` must be defined. `__ttl` is optional. Example `doc`:
-```js
-{__blob: 'Hello world', __index: {attr1: value1, attr2: value2, ...}, __ttl: 5000}
-```
+  ```js
+  {__blob: 'Hello world', __index: {attr1: value1, attr2: value2, ...}, __ttl: 5000}
+  ```
   - Implicit mode: Lawncipher determines what needs to be stored where, based on the indexModel.  
     If the `doc` has no extraneous attributes (compared to the indexModel), then it is stored as indexData only.  
     If the `doc` has extraneous attributes (compared to the indexModel), then it is stored as both indexData and blob, where the blob would hold the document with the extraneous attributes (that cannot fit in the indexModel)  
