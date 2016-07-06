@@ -667,11 +667,20 @@
 
 			if (typeof callback != 'function') throw new TypeError('callback must be a function');
 
-			//Possibility to skip the _index model parameter. Testing types to find the mandatory callback
-			var indexModel, callback;
-			if (typeof _indexModel == 'function'){
-				callback = _indexModel;
-			} else if (typeof _indexModel == 'object'){
+			//If an _indexModel is provided, then check that it's a valid one, before trying to open a collection and try to set it.
+			var indexModel;
+			if (_indexModel){
+				if (typeof _indexModel != 'object'){
+					callback(new TypeError('when defined, _indexModel must be an object'));
+					return;
+				}
+
+				var validationResult = validateIndexModel(_indexModel);
+				if (validationResult){
+					callback(new Error('Invalid description for index field ' + validationResult));
+					return;
+				}
+
 				indexModel = _indexModel;
 			}
 
@@ -1140,7 +1149,7 @@
 
 				var validationResult = validateIndexModel(indexModel);
 				if (validationResult){
-					cb('Invalid description for index field ' + validationResult);
+					cb(new Error('Invalid description for index field ' + validationResult));
 					return;
 				}
 
@@ -1155,11 +1164,8 @@
 					saveModel();
 					return;
 				}
-				//Adapt docs, in a "rollback"-able manner
-				/**
-				* How to make it "rollback"-able?
-				*
-				*/
+
+				//Adapt docs
 				console.error('Not yet implemented : apply the new indexModel on existing collection documents')
 
 				saveModel();
@@ -1181,8 +1187,17 @@
 				}
 			};
 
+			/**
+			* Remove the index model of this collection, if any
+			* @param {Function} cb - callback function, receiving (err), where `err` is the error if one occurred
+			*/
 			this.clearIndexModel = function(cb){
 				if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+				if (!collectionIndexModel){ //No index model in place for this collection -> nothing to do!
+					cb();
+					return;
+				}
 
 				collectionIndexModel = null;
 				collectionMeta.indexModel = null;
@@ -1196,6 +1211,123 @@
 
 					saveRootIndex(cb);
 				});
+			};
+
+			/**
+			* Check whether a transition to a given index model is possible, given the collection's existing documents
+			* @param {Object} indexModel - the indexModel to be tested
+			* @param {Function} cb - callback function, that receives (err, isCompatible, offendingDocs). `err` is an error, and is defined if one occurred. `isCompatible` is a boolean describing whether the model is compatible with the collection's documents. `offendingDocs` is a Hash<DocId, Hash<FieldName, Reason>>, describing the documents that "made the indexModel not compatible"
+			*/
+			this.isIndexModelCompatible = function(indexModel, cb){
+				if (typeof indexModel != 'object') throw new TypeError('indexModel must be an object');
+				if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+				var indexValidationResult = validateIndexModel(indexModel);
+				if (indexValidationResult){
+					cb(new Error('Invalid description for index field ' + indexValidationResult));
+					return;
+				}
+
+				var indexNodeIterator = collectionIndex.nodeIterator();
+				var currentNode;
+
+				var offendingDocs = {};
+				var offendingDocsCount = 0;
+
+				function addOffendingReason(docId, field, reason){
+					if (offendingDocs[docId]){
+						offendingDocs[docId][field].push(reason);
+					} else {
+						offendingDocs[docId] = {};
+						offendingDocs[docId][field] = [reason];
+						offendingDocsCount++;
+					}
+				}
+
+				function processNode(){
+					//Note: when retrieving with forQuery == false (like here), there is no immutability on the retrieved currentSubCollection
+					//i.e : if you modify a doc in currentSubCollection, you have altered the index's memory, and the change could be saved
+					var currentSubCollection = currentNode.getBinnedRange().subCollection;
+					var currentSubCollectionList = Object.keys(currentSubCollection);
+
+					if (currentSubCollectionList.length == 0){ //If there is no data in the current tree leaf, go to the next one!
+						nextNode();
+						return;
+					}
+
+					//Verify data types
+					var currentDoc, currentDocId;
+					for (var i = 0; i < currentSubCollectionList.length; i++){
+						currentDocId = currentSubCollectionList[i];
+						currentDoc = currentSubCollection[currentDocId];
+						if (!currentDoc.index) continue; //The current document doesn't have indexed data. Skip
+						//currentDoc now contains the indexed data for docId currentDocId
+						currentDoc = currentDoc.index;
+
+						/*
+						* Beware, this is dirty, but it should work
+						* To detect all the fields that cause a type mismatch:
+						* -Detect mismatch
+						* -If a type mismatch is detected
+						*		-clone the index data (if the this the first mismatching field detected for the current doc)
+						*		-remove the offending field
+						*		-add the fieldName to a typeMismatches array
+						* -Loop until no type mismatch is detected
+						*/
+						var typeMismatches = [];
+						var validationResult = validateIndexAgainstModel(currentDoc, indexModel);
+						while (typeof validationResult == 'string'){ //validationResult contains the name
+							if (typeMismatches.length == 0){
+								//First mismatch detected for the currentDoc -> clone(currentDoc);
+								currentDoc = clone(currentDoc);
+							}
+							delete currentDoc[validationResult];
+							typeMismatches.push(validationResult);
+
+							validationResult = validateIndexAgainstModel(currentDoc, indexModel);
+						}
+
+						//We exited the loop -> what is left in currentDoc has types that are valid for the given indexModel
+						//Furthermore, the offending fields have their names in typeMismatches
+
+						for (var j = 0; j < typeMismatches.length; j++){
+							addOffendingReason(currentDocId, typeMismatches[j], 'type_mismatch');
+						}
+					}
+
+					//Verifying field/id unicity
+
+				}
+
+				function nextNode(){
+					if (indexNodeIterator.hasNext()){
+						indexNodeIterator.next(function(err, _n){
+							if (err){
+								cb(err);
+								return;
+							}
+
+							currentNode = _n;
+							processNode();
+						});
+					} else {
+						cb(undefined, offendingDocsCount == 0, offendingDocs);
+					}
+				}
+
+				nextNode();
+
+				function checkMapFn(indexedDoc, emit){
+					if (!indexedDoc.index) return; //The doc has no index data -> nothing to validate -> next doc
+
+					var validationResult = validateIndexAgainstModel(indexedDoc.index, indexModel);
+					if (validationResult){
+						emit({})
+						return;
+					}
+				}
+
+				collectionIndex.map(checkMapFn, cb);
 			};
 
 			this.save = function(doc, cb, overwrite, ttl, doNotWriteIndex){
@@ -1866,9 +1998,9 @@
 				//Ignore sorting, as this will be done by the function calling this one (i.e : find or findOne)
 				query = query && shallowCopy(query);
 
-				var sortQuery;
+				var sortAndSkipQuery;
 				if (query && (query.$sort || query.$skip)){
-					sortQuery = {$sort: query.$sort, $skip: query.$skip};
+					sortAndSkipQuery = {$sort: query.$sort, $skip: query.$skip};
 					delete query.$sort;
 					delete query.$skip;
 				}
@@ -1886,7 +2018,7 @@
 						return;
 					}
 
-					cb(undefined, sortQuery ? applyQuery(sortQuery, resultSet, limit, includePureBlobs) : resultSet);
+					cb(undefined, sortQuery ? applyQuery(sortAndSkipQuery, resultSet, limit, includePureBlobs) : resultSet);
 				}, limit, true);
 			}
 
@@ -2581,7 +2713,12 @@
 		function isType(t){for (var i = 0; i < permittedIndexTypes.length; i++){if (permittedIndexTypes[i] == t) return true;} return false;}
 		function isFieldName(n){return /^[\w\-\.]+$/.test(n);}
 
-		//Returns validated model object, or the name of a failing field
+		/**
+		* Returns validated model object, or the name of a failing field
+		* Note that this method modifies models where there are fields that are described
+		* by a simple string (e.g : {fieldName: 'fieldType'} is transformed to {fieldName: {type: 'fieldType'}})
+		*
+		*/
 		function validateIndexModel(model){
 			// {name, type, unique, id}
 			var fieldNames = Object.keys(model);
@@ -3448,7 +3585,7 @@
 
 			var limitReached = false;
 
-			function iterateNode(){
+			function processNode(){
 				/*
 				* Get the data contained in the current tree node.
 				* forQuery indicates whether the the node data should be copied (when forQuery == false) and shouldn't (when forQuery == true)
@@ -3459,10 +3596,16 @@
 				var currentSubCollection = currentNode.getBinnedRange(forQuery ? 'none' : 'clone').subCollection;
 
 				if (forQuery){
+					//If forQuery == true, mapFn receives the entire subset
 					mapFn(currentSubCollection);
 					nextNode();
 				} else {
 					var keysList = Object.keys(currentSubCollection);
+					if (keysList.length == 0){
+						nextNode();
+						return;
+					}
+
 					for (var i = 0; i < keysList.length; i++){
 						currentSubCollection[keysList[i]].id = keysList[i];
 						mapFn(currentSubCollection[keysList[i]], emit);
@@ -3484,7 +3627,7 @@
 						}
 
 						currentNode = _n;
-						iterateNode();
+						processNode();
 					});
 				} else {
 					cb(undefined, resultSet);
@@ -4304,6 +4447,11 @@
 				}
 			};
 
+			/**
+			* Retrieve the data subset that is held a tree leaf that match a given range
+			* @param {PearsonRange} fRange
+			* @param {Object} subset <Key,Value>
+			*/
 			thisNode.lookupRange = function(fRange){
 				if (thisNode.isLeaf()){
 					return thisNode;
