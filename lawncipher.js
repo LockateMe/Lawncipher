@@ -2018,7 +2018,7 @@
 						return;
 					}
 
-					cb(undefined, sortQuery ? applyQuery(sortAndSkipQuery, resultSet, limit, includePureBlobs) : resultSet);
+					cb(undefined, sortAndSkipQuery ? applyQuery(sortAndSkipQuery, resultSet, limit, includePureBlobs) : resultSet);
 				}, limit, true);
 			}
 
