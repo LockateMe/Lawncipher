@@ -12,11 +12,11 @@ Building a rather versatile and persistent encrypted document storage.
 * The entirety of Lawncipher data is encrypted using either a password or a 256-bit key. (In case a password is used, it is transformed into a root key using [scrypt](http://www.tarsnap.com/scrypt.html))
 * Instead of tables containing rows, Lawncipher has collections containing documents
 * A document in Lawncipher has a unique ID and at least one of these two things:
-    * A blob : could a JSON object, a string or arbitrary binary data (in a `Uint8Array`). It is stored encrypted and stored in a dedicated file, and decrypted on request.
+    * A blob : could a JSON object, a string or arbitrary binary data (in a `Uint8Array`). It is stored encrypted and stored in a dedicated file, and decrypted when retrieved from the collection.
     * An indexData : An object, containing the query-able attributes of the document, stored in the collection's index.
-* When running a query, and the result list is being built, for a given result document, the result list will contain its blob. If the document doesn't have a blob, the indexData will take its place in the result list.
+* Lawncipher is blob-first: when running a query, and the result list is being built, for a given result document, the result list will contain its blob. If the document doesn't have a blob, the indexData will take its place in the result list.
 * A schema, called "Index model", can be set for the indexData in a given collection. This schema gives the list and type of attributes that will be stored in the index. It can also determine whether a given attribute gives the IDs to the documents of the collection; as well as whether the value of a given attribute must be unique across the collection (without giving document IDs).
-* When inserting a document, if a JSON object is given as blob, the indexData can easily be extracted from the blob.
+* When inserting a document, if a JSON object is given, the indexData can be [implicitly extracted from the document](httpsL//github.com/LockateMe/Lawncipher/blob/master/doc/API.md#collectionsavedoc-cb-overwrite-ttl).
 * A document can be forced to expire, using TTLs (Time-to-live)
 
 ## Getting started
