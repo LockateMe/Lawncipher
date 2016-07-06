@@ -171,11 +171,11 @@ A [small test app](https://github.com/LockateMe/Lawncipher-cordova-test) has bee
 
 ## API
 
-The Lawncipher API is documented [here](/LockateMe/Lawncipher/blob/master/doc/API.md).
+The Lawncipher API is documented [here](https://github.com/LockateMe/Lawncipher/blob/master/doc/API.md).
 
 ## Internals and file formats
 
-The Lawncipher interals and file formats are documented [here](/LockateMe/Lawncipher/blob/master/doc/Internals.md).
+The Lawncipher interals and file formats are documented [here](https://github.com/LockateMe/Lawncipher/blob/master/doc/Internals.md).
 
 ## License
 
