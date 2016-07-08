@@ -822,6 +822,7 @@
 			var collectionTTLs = null, collectionTTLsChanged = false;
 
 			var collectionIndex; // The index instance, containing the <docId, doc> pairs
+			var searchIndices = {}; //<FieldName, Index>
 			var indexesSeeds = {};
 
 			for (var i = 0; i < rootIndex.length; i++){
@@ -1166,6 +1167,25 @@
 				}
 
 				//Adapt docs
+				/*
+				*	-Running validateIndexAgainstModel and resave every indexed doc (iterate leaf by leaf)
+				*	-Recheck unicity and id for every doc? Detect unicity&id differences from previous model
+				*	-Id field change should not be allowed (if one already exists)! Id creation is however allowed.
+				*	-Detect indexing differences with previous indexModel if any, with the following cases to be handled
+				*		-index: true, unique: false -> index: true, unique: true  :: check that every indexed field value is not pointing to more than one doc (and re-instanciating the index with the correct parameters at the end of this method)
+				*		-index: true, unique: false -> index: false, unique: true :: delete index. check that every value in this field is unique across the collection
+				*		-index: true, unique: false -> index: false, unique: false :: delete index.
+				*		-index: true, unique: true -> index: true, unique: false :: nothing special to do, aside instanciating the index in consequence in the future (and re-instanciating it at the end of this method too)
+				*		-index: true, unique: true -> index: false
+				*		..... Not complete
+				*
+				*		-unique: true -> unique: false :: nothing to do
+				*		-unique: false -> unique: true :: checking that every value is unique accross the collection
+				*		-index: true -> index: false :: index deletion
+				*		-index: false -> index: true :: index construction
+				*
+				*/
+
 				console.error('Not yet implemented : apply the new indexModel on existing collection documents')
 
 				saveModel();
@@ -2671,16 +2691,35 @@
 				});
 			}
 
-			function checkFieldIsUnique(fieldName, value, cb){
+			/**
+			* Check that the a given value for a given field is unique across the collection (either before or after insertion of the document that contains this value)
+			* @param {String} fieldName
+			* @param value - the value for which we are testing unicity
+			* @param {Function} cb - callback function, receives (err, isUnique)
+			* @param {Boolean} [postInsert] - defaults to false ; a parameter that indicates whether this unicity test is done before inserting the document that contain the value (expecting matchingDocIds.length == 0) or afterwards (expecting matchingDocIds.length <= 1)
+			*/
+			function checkFieldIsUnique(fieldName, value, cb, postInsert){
 				if (!cb) throw new TypeError('Missing callback');
 
-				function mapUnicitiyCheckFn(doc, emit){
-					if (doc.index[fieldName == value]) emit(doc.id);
-				}
+				//If there is an index for that field, check existence of value in index
+				if (searchIndices[fieldName]){
+					searchIndices[fieldName].lookup(value, function(err, matchingDocIds){
+						if (err){
+							cb(err);
+							return;
+						}
 
-				collectionIndex.map(mapUnicitiyCheckFn, function(err, matchedDocs){
-					cb(err, matchedDocs.length == 0);
-				}, 1);
+						cb(undefined, matchingDocIds.length <= (postInsert ? 1 : 0));
+					});
+				} else {
+					function mapUnicitiyCheckFn(doc, emit){
+						if (doc.index[fieldName == value]) emit(doc.id);
+					}
+
+					collectionIndex.map(mapUnicitiyCheckFn, function(err, matchedDocs){
+						cb(err, matchedDocs.length <= (postInsert ? 1 : 0));
+					}, 1);
+				}
 			}
 
 		}
