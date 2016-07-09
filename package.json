@@ -1,6 +1,6 @@
 {
   "name": "lawncipher",
-  "version": "1.0.4",
+  "version": "2.0.0",
   "description": "An embedded, encrypted, multi-purpose document store",
   "main": "lawncipher.js",
   "scripts": {
