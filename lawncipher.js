@@ -810,6 +810,10 @@
 			var collectionSize = 0;
 			var collectionIndexSize = 0;
 
+			/*
+			* purgeInterval: the reference to the "scheduled purging cycle" (the cycle that deletes the expired documents). To be used to call clearInterval when closing the collection
+			* purgeOngoing: state variable indicating whether (a purge is needed && the purge is ongoing)
+			*/
 			var purgeInterval, purgeOngoing = false;
 
 			var collectionDescription; //The object to be added to the collection list, describing the current collection
@@ -892,7 +896,8 @@
 									return;
 								}
 
-								processInitParams();
+								//Existing collection -> loading searchIndices, if any
+								loadAllSearchIndices(endInit);
 							});
 						});
 
@@ -939,7 +944,7 @@
 				});
 			}
 
-			function processInitParams(){
+			function endInit(){
 				//Checking that if an indexModel is provided as a parameter of this call, it hasn't changed with the one already saved on file.
 				/*if (indexModel && collectionMeta.indexModel){
 					if (!deepObjectEquality(collectionMeta.indexModel, indexModel)){
@@ -969,12 +974,15 @@
 					endCollectionLoad();
 				}*/
 
-				endCollectionLoad();
+				/*endCollectionLoad();
 
 				function endCollectionLoad(){
 					purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue);
 					cb(undefined, self);
-				}
+				}*/
+
+				purgeInterval = setInterval(ttlCheckAndPurge, purgeIntervalValue);
+				cb(undefined, self);
 			}
 
 			function migrateV1DocumentsIndex(){
@@ -1061,10 +1069,187 @@
 								return;
 							}
 
-							processInitParams();
+							endInit();
 						});
 					});
 				});
+			}
+
+			function loadAllSearchIndices(cb){
+				if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+				if (!collectionIndexModel){ //No indexModel -> no search indices
+					cb();
+					return;
+				}
+
+				//Iterating over each attribute in the indexModel, to see which ones have indexing enabled
+				var indexList = [];
+				var indexModelAttributes = Object.keys(collectionIndexModel);
+				for (var i = 0; i < indexModelAttributes.length; i++){
+					//The current attribute has indexing enabled
+					if (collectionIndexModel[indexModelAttributes[i]].index){
+						indexList.push(indexModelAttributes[i]);
+					}
+				}
+
+				if (indexList.length == 0){
+					//Found no attributes that have indexing enabled -> get out of this method
+					cb();
+					return;
+				}
+
+				//Async loop (featuring callback hells), that loads the collection's search indices
+				var loadIndex = 0;
+
+				function loadOne(){
+					var currentAttribute = indexList[loadIndex];
+					loadSearchIndex(currentAttribute, function(err){
+						if (err){
+							cb();
+							return;
+						}
+
+						loadNext();
+					});
+				}
+
+				function loadNext(){
+					loadIndex++;
+					if (loadIndex == indexList.length){
+						cb();
+					} else {
+						loadOne();
+					}
+				}
+
+				loadOne();
+			}
+
+			function loadSearchIndex(fieldName, cb){
+				//fieldName _index is disallowed, by design (conflicting with the collection's central index)
+				if (fieldName == '_index'){
+					cb();
+					return;
+				}
+
+				if (!indexesSeeds[fieldName]){
+					//This is a new index, as it doesn't have a seed yet.
+					//Generating one
+					indexesSeeds[fieldName] = PearsonSeedGenerator();
+					saveMetaIndex(function(err){
+						if (err){
+							cb(err);
+							return;
+						}
+
+						initIndex();
+					});
+				} else {
+					//The index seems to already exist, as it has a seed.
+					//Checking files presence, just to be sure.
+
+					initIndex();
+				}
+
+
+				function initIndex(){
+					var i = new Index(rootPath, collectionName, '_' + fieldName, k, indexesSeeds[fieldName], function(loadSearchIndex){
+						if (loadIndexErr){
+							cb(loadIndexErr);
+							return;
+						}
+
+						searchIndices[fieldName] = i;
+						cb();
+					});
+				}
+			}
+
+			/**
+			* Delete a search index in the current collection, if it exists. If an index doesn't exist
+			* @param {String} fieldName - the name of the indexed field. A valid fieldName is part of the indexModel
+			* @param {Function} cb - callback function. Receives (err), where `err` is an error if one occurred
+			*/
+			function deleteSearchIndex(fieldName, cb){
+				//Checking whether the index exists
+				//Since the seed will be the last thing to be removed, so this test shall have few false positives
+				if (!indexesSeeds[fieldName]){
+					cb();
+					return;
+				}
+
+				//Getting the index fragments list
+				fs.readdir(collectionPath, function(err, colFileList){
+					if (err){
+						cb(err);
+						return;
+					}
+
+					if (colFileList.length == 0){
+						/*
+						* No index fragment file has been found. However, an index seed exists for fieldName
+						* -> deleteIndexSeed();
+						*/
+						deleteIndexSeed(cb);
+						return;
+					}
+
+					var searchIndexRegex = indexNameRegexBuilder(fieldName);
+					var indexFragmentsList = [];
+					for (var i = 0; i < colFileList.length; i++){
+						if (searchIndexRegex.test(colFileList[i])) indexFragmentsList.push(colFileList[i]);
+					}
+
+					if (indexFragmentsList.length == 0){ //No files found for that search index
+						/*
+						* No index fragment file has been found. However, an index seed exists for fieldName
+						* -> deleteIndexSeed();
+						*/
+						deleteIndexSeed(cb);
+						return;
+					}
+
+					//Fragment deletion async loop here. Check that there is work to do...
+
+					function deleteFragments(next){
+						var deletionIndex = 0;
+
+						function deleteOneFragment(){
+							fs.unlink(pathJoin(collectionPath, indexFragmentsList[deletionIndex]), function(err){
+								if (err){
+									cb(err);
+									return;
+								}
+
+								nextDeletion();
+							});
+						}
+
+						function nextDeletion(){
+							deletionIndex++;
+							if (deletionIndex == indexFragmentsList.length){
+								if (typeof next == 'function') next();
+							} else {
+								deleteOneFragment();
+							}
+						}
+
+						deleteOneFragment();
+					}
+
+					deleteFragments(function(){
+						deleteIndexSeed(cb);
+					});
+				});
+
+				function deleteIndexSeed(next){
+					//Remove the index's seed from indexesSeeds, and the Index instance.
+					delete indexesSeeds[fieldName];
+					delete searchIndices[fieldName];
+					//Re-save the _meta file of the collection, with the index seed removed. Get out of the this deletion method through cb
+					saveMetaIndex(next);
+				}
 			}
 
 			function docToBlobAndIndex(doc){
@@ -1110,7 +1295,7 @@
 										index[indexAttributes[i]] = doc[indexAttributes[i]];
 									}
 								} else {
-									//All the attribudes of doc fit in the model. Hence save as indexData
+									//All the attributes of doc fit in the model. Hence save as indexData
 									index = doc;
 								}
 							}
@@ -1187,6 +1372,15 @@
 				*/
 
 				console.error('Not yet implemented : apply the new indexModel on existing collection documents')
+
+				self.isIndexModelCompatible(indexModel, function(err, isCompatible, offendingDocs){
+					if (err){
+						cb(err);
+						return;
+					}
+
+
+				});
 
 				saveModel();
 
@@ -1337,7 +1531,7 @@
 
 				nextNode();
 
-				function checkMapFn(indexedDoc, emit){
+				/*function checkMapFn(indexedDoc, emit){
 					if (!indexedDoc.index) return; //The doc has no index data -> nothing to validate -> next doc
 
 					var validationResult = validateIndexAgainstModel(indexedDoc.index, indexModel);
@@ -1347,7 +1541,7 @@
 					}
 				}
 
-				collectionIndex.map(checkMapFn, cb);
+				collectionIndex.map(checkMapFn, cb);*/
 			};
 
 			this.save = function(doc, cb, overwrite, ttl, doNotWriteIndex){
@@ -3417,6 +3611,8 @@
 						//No index fragments file has been found, despite an existing collection directory.
 						//The only "range fragment" to be available is the full range.
 						fragmentsList = [PearsonRange.MAX_RANGE];
+						//When an index is created, and no index fragment is yet written, that's the only loaded range
+						currentLoadedFragmentsRange[PearsonRange.MAX_RANGE.toString()] = PearsonRange.MAX_RANGE;
 					}
 
 					//console.log('Existing ranges: ' + Array.prototype.join.call(fragmentsList.map(function(v){return v.toString()}), ','));
@@ -3548,7 +3744,7 @@
 							}
 
 							cb(null, receiverNode);
-						});
+						}, true); //mustFind == true
 					}
 				};
 
@@ -3687,14 +3883,19 @@
 			loadIndexFragment(rangeOfHash, _cb);
 		}
 
-		function loadIndexFragment(fRange, _cb){
+		function loadIndexFragment(fRange, _cb, mustFind){
 			//console.log('Loading range ' + fRange.toString())
 			var fileName = pathJoin(collectionPath, fragmentNameBuilder(fRange));
 			fs.readFile(fileName, function(err, fileData){
 				if (err){
 					//Support the case where the index fragment file doesn't exist (in Node.js and cordova-plugin-file-node-like)
 					if ((typeof err == 'string' && err.indexOf('NOT_FOUND_ERR') != -1) || (err.message.indexOf('ENOENT') != -1)){
-						if (_cb) _cb();
+						if (mustFind){
+							if (_cb) _cb('index fragment file cannot be found');
+							else throw 'index fragment file cannot be found';
+						} else {
+							if (_cb) _cb();
+						}
 						return;
 					}
 					//Throw other errors
@@ -4492,13 +4693,13 @@
 			* @param {Object} subset <Key,Value>
 			*/
 			thisNode.lookupRange = function(fRange){
-				if (thisNode.isLeaf()){
-					return thisNode;
+				if (this.isLeaf()){
+					return this;
 				} else {
-					if (left.range().contains(fRange)){
-						return left.lookupNodeForRange(fRange);
-					} else if (right.range().contains(fRange)) {
-						return right.lookupNodeForRange(fRange);
+					if (left.range().containsRange(fRange)){
+						return left.lookupRange(fRange);
+					} else if (right.range().containsRange(fRange)){
+						return right.lookupRange(fRange);
 					} else {
 						return null; //No node cannot be found bearing the exact fRange
 					}
