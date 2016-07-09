@@ -5,6 +5,7 @@
 - [x] Be sure that indexing is explained properly
 - [ ] indexModel apply on existing docs, "rollback"-able to allow some room for type misfits?
   - [ ] add a method to make a "dry run" of a indexModel change. The method will iterate and validate each document against the new indexModel. No change will be made on the docs/collection though. But this method can prevent us from having to design a "rollback"-able indexModel change...
+  - [ ] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable
 - [ ] indexes on `index: true` flag in indexModel. will work best string, buffers, boolean(what about largely uneven distribution?) and dates(?)
   - [ ] boolean index, 2 subtrees
     * one for `true`, one for `false`
