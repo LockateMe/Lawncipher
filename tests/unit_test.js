@@ -672,6 +672,10 @@
 				limit: 2
 			},
 			{
+				message: 'Clearing indexModel',
+				collectionName: 'test_model_collection'
+			},
+			{
 				message: 'Closing the db'
 			}
 		];
@@ -768,6 +772,7 @@
 			test_find,
 			test_find,
 			test_find,
+			test_clearIndexModel,
 			test_close
 		];
 
@@ -899,6 +904,26 @@
 				var currentModel = collections[name].getIndexModel();
 				if (!deepObjectEquality(_params.indexModel, currentModel)){
 					next('Unexpected indexModel: ' + JSON.stringify(currentModel));
+					return;
+				}
+
+				next();
+			});
+		}
+
+		function test_clearIndexModel(next){
+			var _params = getParams();
+			var name = _params.collectionName;
+			collections[name].clearIndexModel(function(err){
+				if (err){
+					next(err);
+					return;
+				}
+
+				//Checking getIndexModel by the way...
+				var currentModel = collections[name].getIndexModel();
+				if (currentModel){ //currentModel must not be defined after a clear. Error otherwise
+					next('Unexpect indexModel (after clearIndexModel): ' + JSON.stringify(currentModel));
 					return;
 				}
 

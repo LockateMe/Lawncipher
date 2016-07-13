@@ -24,7 +24,7 @@
 - [ ] Write some more `save` and `bulkSave` examples
 - [ ] reorganize the parameters of `retrieveIndexDocsMatchingQuery()`
 - [ ] document the new indexModel API
-- [ ] test clearIndexModel
+- [x] test clearIndexModel
 - [ ] Native Cordova crypto_secretbox_easy plugin, for iOS and Android
   - [ ] crypto_secretbox_easy
   - [ ] crypto_secretbox_open_easy
