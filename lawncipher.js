@@ -677,7 +677,7 @@
 
 				var validationResult = validateIndexModel(_indexModel);
 				if (validationResult){
-					callback(new Error('Invalid description for index field ' + validationResult));
+					callback(new Error('Invalid index model: ' + validationResult));
 					return;
 				}
 
@@ -1335,7 +1335,7 @@
 
 				var validationResult = validateIndexModel(indexModel);
 				if (validationResult){
-					cb(new Error('Invalid description for index field ' + validationResult));
+					cb(new Error('Invalid index model: ' + validationResult));
 					return;
 				}
 
@@ -1438,7 +1438,7 @@
 
 				var indexValidationResult = validateIndexModel(indexModel);
 				if (indexValidationResult){
-					cb(new Error('Invalid description for index field ' + indexValidationResult));
+					cb(new Error('Invalid index model' + indexValidationResult));
 					return;
 				}
 
@@ -1510,7 +1510,7 @@
 					}
 
 					//Verifying field/id unicity
-
+					v
 				}
 
 				function nextNode(){
@@ -2959,7 +2959,7 @@
 			for (var i = 0; i < fieldNames.length; i++){
 				var fieldName = fieldNames[i];
 
-				if (!isFieldName(fieldName)) return fieldName;
+				if (!isFieldName(fieldName)) return 'INVALID_FIELD_NAME_FORMAT:' + fieldName;
 
 				var fieldDescription = model[fieldName];
 
@@ -2970,13 +2970,13 @@
 					fieldDescription = {type: fieldDescription.type, id: fieldDescription.id, unique: fieldDescription.unique};
 				} else {
 					//Invalid field description
-					return fieldName;
+					return 'INVALID_FIELD_DESCRIPTION:' + fieldName;
 				}
 
-				if (!isType(fieldDescription.type)) return fieldName;
+				if (!isType(fieldDescription.type)) return 'INVALID_FIELD_TYPE:' + fieldName + '(' + fieldDescription.type + ')';
 
 				if (fieldDescription.id){
-					if (idField) return fieldName; //An ID field already exists
+					if (idField) return 'ID_FIELD_CONFLICT:' + idField + 'vs' + fieldName; //An ID field already exists
 					else idField = fieldName;
 				}
 
