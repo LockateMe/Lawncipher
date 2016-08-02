@@ -127,6 +127,13 @@
 	var from_base64, to_base64;
 	var from_string;
 
+	if (sodium){
+		//Referencing missing encoding methods
+		from_base64 = sodium.from_base64;
+		to_base64 = sodium.to_base64;
+		from_string = sodium.from_string;
+	}
+
 	var toStringChunkSize = 32767;
 
 	function to_string(bytes) {
@@ -521,10 +528,7 @@
 			//Throw an error if neither MiniSodium nor Libsodium are available
 			throw new Error('Error on loading Lawncipher : Libsodium is missing');
 		} else {
-			//Referencing missing encoding methods
-			from_base64 = sodium.from_base64;
-			to_base64 = sodium.to_base64;
-			from_string = sodium.from_string;
+
 		}
 
 		if (!(typeof rootPath == 'string' && rootPath.length > 0)) throw new TypeError('rootPath must be a non-null string');
