@@ -26,6 +26,8 @@
 	var randomBuffer; //Holds a reference to a function that generates a given number of pseudo random bytes. Implementation depends on context
 	var checkWriteBuffer, checkReadBuffer; //Holds references to functions that we are writing and reading files with the right type of buffer (Uint8Array vs Buffer, depending on context, again)
 	var scryptProv, scryptProvAsync;
+	var cryptoProv, cryptoProvAsync;
+	var MiniSodium;
 
 	//Adding an init method when not running in Node or in one of its derivatives
 	if (!nodeContext){
@@ -118,11 +120,12 @@
 		}
 	}
 
-	if (!sodium) throw new Error('Error on loading Lawncipher : Libsodium is missing');
+	//if (!sodium) throw new Error('Error on loading Lawncipher : Libsodium is missing');
 	if (!Long) throw new Error('Error on loading Lawncipher: Long.js is missing');
 
-	var from_hex = sodium.from_hex, to_hex = sodium.to_hex, from_base64 = sodium.from_base64, to_base64 = sodium.to_base64;
-	var from_string = sodium.string_to_Uint8Array || sodium.from_string;// to_string = sodium.uint8Array_to_String || sodium.to_string;
+	//var from_hex, to_hex;
+	var from_base64, to_base64;
+	var from_string;
 
 	var toStringChunkSize = 32767;
 
@@ -188,7 +191,28 @@
 		}
 	}
 
-	var is_hex = function(s){
+	function from_hex(str) {
+		if (!is_hex(str)) throw new TypeError("The provided string doesn't look like hex data");
+		var result = new Uint8Array(str.length / 2);
+		for (var i = 0; i < str.length; i += 2) {
+			result[i >>> 1] = parseInt(str.substr(i, 2), 16);
+		}
+		return result;
+	}
+
+	function to_hex(bytes) {
+		var str = "", b, c, x;
+		for (var i = 0; i < bytes.length; i++) {
+			c = bytes[i] & 0xf;
+			b = bytes[i] >>> 4;
+			x = (87 + c + (((c - 10) >> 8) & ~38)) << 8 |
+					(87 + b + (((b - 10) >> 8) & ~38));
+			str += String.fromCharCode(x & 0xff) + String.fromCharCode(x >>> 8);
+		}
+		return str;
+	}
+
+	function is_hex(s){
 		return typeof s == 'string' && s.length % 2 == 0 && /^([a-f]|[0-9])+$/ig.test(s);
 	};
 
@@ -281,6 +305,122 @@
 		}
 	}
 
+	function setCryptoProvider(_cryptoProvider, _async){
+		if (typeof _cryptoProvider != 'object') throw new TypeError('_cryptoProvider must be an object');
+		if (typeof _cryptoProvider.crypto_secretbox_easy != 'function') throw new TypeError('_cryptoProvider.crypto_secretbox_easy must be a function');
+		if (typeof _cryptoProvider.crypto_secretbox_open_easy != 'function') throw new TypeError('_cryptoProvider.crypto_secretbox_open_easy must be a function');
+
+		cryptoProv = _cryptoProvider;
+		cryptoProvAsync = _async;
+	}
+
+	function setDefaultCryptoProvider(){
+		if (!sodium) throw new Error('Libsodium is missing');
+		cryptoProv = {
+			crypto_secretbox_easy: sodium.crypto_secretbox_easy,
+			crypto_secretbox_open_easy: sodium.crypto_secretbox_open_easy
+		};
+
+		cryptoProvAsync = false;
+	}
+
+	function cordovaPluginSecretBoxEasyProvider(plain, nonce, key, callback, resultEncoding){
+		if (resultEncoding && !(resultEncoding == 'uint8array' || resultEncoding == 'text' || resultEncoding == 'hex' || resultEncoding == 'base64')){
+			callback(new Error('Invalid resultEncoding: ' + resultEncoding));
+			return;
+		}
+
+		MiniSodium.crypto_secretbox_easy(plain, nonce, key, function(err, cipher){
+			if (err){
+				callback(err);
+				return;
+			}
+
+			if (resultEncoding){
+				if (resultEncoding == 'uint8array') callback(undefined, cipher);
+				else if (resultEncoding == 'text') callback(undefined, MiniSodium.to_string(cipher));
+				else if (resultEncoding == 'hex') callback(undefined, MiniSodium.to_hex(cipher));
+				else if (resultEncoding == 'base64') callback(undefined, MiniSodium.to_base64(cipher));
+				else throw new Error('Invalid resultEncoding: ' + resultEncoding);
+			} else callback(undefined, cipher);
+		});
+	}
+
+	function cordovaPluginSecretBoxOpenEasyProvider(cipher, nonce, key, callback, resultEncoding){
+		if (resultEncoding && !(resultEncoding == 'uint8array' || resultEncoding == 'text' || resultEncoding == 'hex' || resultEncoding == 'base64')){
+			callback(new Error('Invalid resultEncoding: ' + resultEncoding));
+			return;
+		}
+
+		MiniSodium.crypto_secretbox_open_easy(cipher, nonce, key, function(err, plain){
+			if (err){
+				callback(err);
+				return;
+			}
+
+			if (resultEncoding){
+				if (resultEncoding == 'uint8array') callback(undefined, plain);
+				else if (resultEncoding == 'text') callback(undefined, MiniSodium.to_string(plain));
+				else if (resultEncoding == 'hex') callback(undefined, MiniSodium.to_hex(plain));
+				else if (resultEncoding == 'base64') callback(undefined, MiniSodium.to_base64(plain));
+				else throw new Error('Invalid resultEncoding: ' + resultEncoding);
+			} else callback(undefined, plain);
+		});
+	}
+
+	function useCordovaPluginMiniSodium(){
+		if (!window.plugins.MiniSodium) throw new Error('MiniSodium plugin cannot be found');
+		MiniSodium = window.plugins.MiniSodium;
+
+		cryptoProv = {
+			crypto_secretbox_easy: cordovaPluginSecretBoxEasyProvider,
+			crypto_secretbox_open_easy: cordovaPluginSecretBoxOpenEasyProvider
+		};
+
+		cryptoProvAsync = true;
+
+		scryptProv = function(password, salt, opsLimit, r, p, keyLength, callback){
+			MiniSodium.crypto_pwhash_scryptsalsa208sha256_ll(keyLength, password, salt, opsLimit, r, p, callback);
+		};
+		scryptProvAsync = true;
+
+		//from_hex = MiniSodium.from_hex;
+		//to_hex = MiniSodium.to_hex;
+		from_base64 = MiniSodium.from_base64;
+		to_base64 = MiniSodium.to_base64;
+		from_string = MiniSodium.from_string;
+	}
+
+	function doSecretBox(message, nonce, key, callback, resultEncoding){
+		if (cryptoProvAsync){
+			cryptoProv.crypto_secretbox_easy.apply({}, arguments);
+		} else {
+			var cipher;
+			try {
+				cipher = cryptoProv.crypto_secretbox_easy.apply({}, [message, nonce, key, resultEncoding]);
+			} catch (e){
+				callback(e);
+				return;
+			}
+			callback(undefined, cipher);
+		}
+	}
+
+	function doSecretBoxOpen(cipher, nonce, key, callback, resultEncoding){
+		if (cryptoProvAsync){
+			cryptoPrv.crypto_secretbox_open_easy.apply({}, arguments);
+		} else {
+			var plain;
+			try {
+				plain = cryptoProv.crypto_secretbox_open_easy.apply({}, [cipher, nonce, key, resultEncoding]);
+			} catch (e){
+				callback(e);
+				return;
+			}
+			callback(undefined, plain);
+		}
+	}
+
 	/*
 	* Scrypt provider must have the following interface
 	* Uint8Array|String password
@@ -337,6 +477,28 @@
 		}, password, dumbSalt, settings);
 	}
 
+	function doScrypt(password, salt, opsLimit, r, p, keyLength, cb){
+		opsLimit = opsLimit || 16384;
+		r = r || 8;
+		p = p || 1;
+		keyLength = keyLength || 32;
+
+		var argsArray = Array.prototype.slice.call(arguments);
+
+		if (scryptProvAsync){
+			scryptProv.apply({}, argsArray);
+		} else {
+			var derivedKey;
+			try {
+				derivedKey = scryptProv.apply({}, argsArray.slice(0, 6));
+			} catch (e){
+				cb(e);
+				return;
+			}
+			cb(undefined, derivedKey);
+		}
+	}
+
 	setDefaultScryptProvider();
 
 	exports.setScryptProvider = setScryptProvider;
@@ -347,6 +509,24 @@
 	exports.db = Lawncipher;
 
 	function Lawncipher(rootPath, _fs){
+		//Allow Libsodium to be missing, in case MiniSodium is available
+		if (window && window.plugins && window.plugins.MiniSodium){
+			//Shortcut reference
+			MiniSodium = window.plugins.MiniSodium;
+			//Referencing MiniSodium to sodium, to allow access to constants normally available under sodium.crypto_*
+			sodium = MiniSodium;
+			//Initializing Lawncipher to use MiniSodium
+			useCordovaPluginMiniSodium();
+		} else if (!sodium){
+			//Throw an error if neither MiniSodium nor Libsodium are available
+			throw new Error('Error on loading Lawncipher : Libsodium is missing');
+		} else {
+			//Referencing missing encoding methods
+			from_base64 = sodium.from_base64;
+			to_base64 = sodium.to_base64;
+			from_string = sodium.from_string;
+		}
+
 		if (!(typeof rootPath == 'string' && rootPath.length > 0)) throw new TypeError('rootPath must be a non-null string');
 
 		if (!nodeContext){
@@ -502,28 +682,6 @@
 			var encryptedIndexBuffer = cryptoFileEncoding.encrypt(from_string(rootIndexStr), rootKey, rootSalt);
 			encryptedIndexBuffer = checkWriteBuffer(encryptedIndexBuffer);
 			fs.writeFile(rootIndexPath, encryptedIndexBuffer, cb);
-		}
-
-		function doScrypt(password, salt, opsLimit, r, p, keyLength, cb){
-			opsLimit = opsLimit || 16384;
-			r = r || 8;
-			p = p || 1;
-			keyLength = keyLength || 32;
-
-			var argsArray = Array.prototype.slice.call(arguments);
-
-			if (scryptProvAsync){
-				scryptProv.apply({}, argsArray);
-			} else {
-				var derivedKey;
-				try {
-					derivedKey = scryptProv.apply({}, argsArray.slice(0, 6));
-				} catch (e){
-					cb(e);
-					return;
-				}
-				cb(undefined, derivedKey);
-			}
 		}
 
 		/**
@@ -1510,7 +1668,7 @@
 					}
 
 					//Verifying field/id unicity
-					v
+
 				}
 
 				function nextNode(){
