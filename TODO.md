@@ -19,15 +19,15 @@
     - [ ] -> get inspired by cryptDB
     - [ ] string encoding for numbers (and decimals!), that respect order/lexicographical relation. But that won't fix the problem you will have with the Pearson hashing function (loss of order)
   - [ ] `$fuzzy`, `$contain`/`$like`, `$fuzzylike`  matching on strings, for Lawncipher v2.1?
-- [ ] use indexes for unique value and id existence checks
+- [x] use indexes for unique value and id existence checks
 - [ ] use indexes in compound queries, using them to build a data subset when possible (on which the rest of the query will be ran)
 - [ ] Write some more `save` and `bulkSave` examples
 - [ ] reorganize the parameters of `retrieveIndexDocsMatchingQuery()`
 - [ ] document the new indexModel API
 - [x] test clearIndexModel
-- [ ] Native Cordova crypto_secretbox_easy plugin, for iOS and Android
-  - [ ] crypto_secretbox_easy
-  - [ ] crypto_secretbox_open_easy
+- [x] Native Cordova crypto_secretbox_easy plugin, for iOS and Android
+  - [x] crypto_secretbox_easy
+  - [x] crypto_secretbox_open_easy
 - [ ] SetSecretboxProvider method, like with Scrypt
 - [ ] How to count docs and determine the size of the collection, without performing useless writes?
   - [ ] Re-read how it was done in v1, to see exactly what was measured...
