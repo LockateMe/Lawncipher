@@ -562,21 +562,7 @@
 	exports.db = Lawncipher;
 
 	function Lawncipher(rootPath, _fs){
-		if (!initCalled) throw new Error('Call Lawncipher.init() before using Lawncipher.db');
-		//Allow Libsodium to be missing, in case MiniSodium is available
-		/*if (window && window.plugins && window.plugins.MiniSodium){
-			//Shortcut reference
-			MiniSodium = window.plugins.MiniSodium;
-			//Referencing MiniSodium to sodium, to allow access to constants normally available under sodium.crypto_*
-			sodium = MiniSodium;
-			//Initializing Lawncipher to use MiniSodium
-			useCordovaPluginMiniSodium();
-		} else if (!sodium){
-			//Throw an error if neither MiniSodium nor Libsodium are available
-			throw new Error('Error on loading Lawncipher : Libsodium is missing');
-		} else {
-
-		}*/
+		if (!initCalled) throw new Error('You must call Lawncipher.init() before using Lawncipher.db');
 
 		if (!(typeof rootPath == 'string' && rootPath.length > 0)) throw new TypeError('rootPath must be a non-null string');
 
@@ -649,22 +635,6 @@
 							rootIndexHeader = rootIndexHeader || cryptoFileEncoding.decode(rootIndexBuffer);
 
 							rootSalt = rootIndexHeader.salt;
-
-							/*var rootIndexStr;
-							try {
-								rootIndexStr = cryptoFileEncoding.decrypt(rootIndexBuffer, rootKey, rootIndexHeader);
-								rootIndexStr = to_string(rootIndexStr);
-							} catch (e){
-								rootKey = undefined;
-
-								var errMsg;
-								if (typeof e == 'string') errMsg = e;
-								else if (typeof e == 'object') errMsg = e.message || e;
-								else errMsg = e;
-
-								callback(errMsg);
-								return;
-							}*/
 
 							cryptoFileEncoding.decrypt(rootIndexBuffer, rootKey, rootIndexHeader, function(err, rootIndexStr){
 								if (err){
@@ -1104,7 +1074,7 @@
 
 							var encryptedMetaBuffer = checkReadBuffer(data);
 
-							scryptFileDecode(encryptedMetaBuffer, k, undefined, function(err, decryptedMetaBuffer){
+							cryptoFileEncoding.decrypt(encryptedMetaBuffer, k, undefined, function(err, decryptedMetaBuffer){
 								if (err){
 									console.error('Can\'t decrypt _meta file for collection ' + collectionName);
 									console.error(JSON.stringify(e));
@@ -1133,16 +1103,6 @@
 									loadAllSearchIndices(endInit);
 								});
 							});
-
-							/*var decryptedMetaBuffer;
-							try {
-								decryptedMetaBuffer = scryptFileDecode(encryptedMetaBuffer, k);
-							} catch (e){
-								console.error('Can\'t decrypt _meta file for collection ' + collectionName);
-								console.error(JSON.stringify(e));
-								cb('INVALID_ROOTKEY');
-								return;
-							}*/
 						});
 
 					} else {
@@ -1238,7 +1198,6 @@
 						return
 					}
 
-					//var encryptedFileBuffer = from_base64(data);
 					var encryptedFileBuffer = checkReadBuffer(data);
 					collectionIndexSize = data.length;
 					if (encryptedFileBuffer.length < minFileSize){
@@ -1318,13 +1277,6 @@
 							});
 						});
 					}, 'text');
-
-					/*var decryptedIndexStr = sodium.crypto_secretbox_open_easy(cipherBuffer, nonceBuffer, k, 'text');
-					if (!decryptedIndexStr){
-						console.error('Can\'t decrypt index file for collection ' + collectionName);
-						cb('INVALID_ROOTKEY');
-						return;
-					}*/
 				});
 			}
 
@@ -2442,7 +2394,7 @@
 
 				var metaIndexStr = JSON.stringify(collectionMeta);
 
-				scryptFileEncode(from_string(metaIndexStr), k, function(err, metaIndexCipher){
+				cryptoFileEncoding.encrypt(from_string(metaIndexStr), k, function(err, metaIndexCipher){
 					if (err){
 						cb(err);
 						return;
@@ -2452,9 +2404,6 @@
 
 					fs.writeFile(metaFilePath, metaIndexCipher, cb);
 				});
-
-				//var metaIndexCipher = scryptFileEncode(from_string(metaIndexStr), k);
-				//metaIndexCipher = checkWriteBuffer(metaIndexCipher);
 			}
 
 			function getIndexFileName(r){
@@ -2791,9 +2740,6 @@
 							});
 						});
 					});
-
-					//var encryptedFileData = sodium.crypto_secretbox_easy(dataBuffer, docNonce, docKey);
-
 				}
 
 				function prepareIndex(_cb){
@@ -2913,8 +2859,8 @@
 
 								doSecretBoxOpen(cipherBuffer, nonceBuffer, from_base64(doc.k), function(err, decryptedBlob){
 									if (err){
-										console.error('While decrypting blob');
-										console.error(err);
+										//console.error('While decrypting blob');
+										//console.error(err);
 										cb('CORRUPTED_BLOB');
 										return;
 									}
@@ -2943,12 +2889,6 @@
 									}
 									cb(undefined, result);
 								});
-
-								/*var decryptedBlob = sodium.crypto_secretbox_open_easy(cipherBuffer, nonceBuffer, from_base64(doc.k));
-								if (!decryptedBlob){
-									cb('CORRUPTED_BLOB');
-									return;
-								}*/
 							});
 						});
 					} else cb(undefined, clone(doc.index));
@@ -3115,7 +3055,7 @@
 
 				var ttlsStr = JSON.stringify(collectionTTLs);
 
-				scryptFileEncode(from_string(ttlsStr), k, function(err, ttlsCipher){
+				cryptoFileEncoding.encrypt(from_string(ttlsStr), k, function(err, ttlsCipher){
 					if (err){
 						cb(err);
 						return;
@@ -3125,7 +3065,6 @@
 
 					fs.writeFile(ttlsFilePath, ttlsCipher, cb);
 				});
-				//var ttlsCipher = scryptFileEncode(from_string(ttlsStr), k);
 			}
 
 			function loadTTLs(cb){
@@ -3145,7 +3084,7 @@
 
 							var ttlsCipher = checkReadBuffer(data);
 
-							scryptFileDecode(ttlsCipher, k, function(err, ttlsBuffer){
+							cryptoFileEncoding.decrypt(ttlsCipher, k, function(err, ttlsBuffer){
 								if (err){
 									console.error('Cannot decrypt TTLs list for collection ' + collectionName + ': ' + err);
 									cb('INVALID_ROOTKEY');
@@ -3161,15 +3100,6 @@
 
 								cb();
 							});
-
-							/*var ttlsBuffer;
-							try {
-								ttlsBuffer = scryptFileDecode(ttlsCipher, k);
-							} catch (e){
-								console.error('Cannot decrypt TTLs list for collection ' + collectionName + ': ' + err);
-								cb('INVALID_ROOTKEY');
-								return;
-							}*/
 						});
 					}
 				});
@@ -3645,9 +3575,7 @@
 			bIndex += cipher.length;
 
 			callback(undefined, b);
-			//return b;
 		});
-		//var cipher = sodium.crypto_secretbox_easy(buffer, nonce, rootKey);
 	}
 
 	function scryptFileDecode(buffer, key, headerData, callback){
@@ -3678,27 +3606,12 @@
 
 		doSecretBoxOpen(headerData.cipher, headerData.nonce, key, function(err, plainText){
 			if (err){
-				//console.error('error in scryptFileDecode decryption');
-				//console.error(err);
 				callback('INVALID_ROOTKEY');
 				return;
 			}
 
 			callback(undefined, plainText);
 		});
-
-		/*
-		//Decrypting the ciphertext
-		//console.log('Ciphertext: ' + to_hex(cipherText));
-		var plainText;
-		try {
-			plainText = sodium.crypto_secretbox_open_easy(headerData.cipher, headerData.nonce, rootKey);
-		} catch (e){
-			throw 'INVALID_ROOTKEY';
-		}
-		//console.log('Key plain text:' + to_hex(plainText));
-		return plainText; //If returned result is undefined, then invalid rootKey (or corrupted buffer)
-		*/
 	}
 
 	function scryptFileDecodeHeader(buffer){
@@ -4281,9 +4194,7 @@
 
 				fileData = checkReadBuffer(fileData);
 
-				//var fragmentPlainText = scryptFileDecode(fileData, collectionKey);
-
-				scryptFileDecode(fileData, collectionKey, undefined, function(err, fragmentPlainText){
+				cryptoFileEncoding.decrypt(fileData, collectionKey, undefined, function(err, fragmentPlainText){
 					if (err){
 						_cb(err);
 						return;
@@ -4326,7 +4237,7 @@
 
 			var fragmentPlainText = from_string(JSON.stringify(serializeObject(fData)));
 
-			scryptFileEncode(fragmentPlainText, collectionKey, function(err, fragmentCipherText){
+			cryptoFileEncoding.encrypt(fragmentPlainText, collectionKey, function(err, fragmentCipherText){
 				if (err){
 					if (_cb) _cb(err);
 					else throw err;
@@ -4350,8 +4261,6 @@
 					if (_cb) _cb();
 				});
 			});
-
-			//var fragmentCipherText = scryptFileEncode(fragmentPlainText, collectionKey);
 		}
 
 		function deleteIndexFragment(fRange, _cb){
