@@ -31,6 +31,8 @@ Then, we are good to go:
 
 ```js
 var Lawncipher = require('lawncipher');
+Lawncipher.init();
+
 var db = new Lawncipher.db('path/to/my/database');
 
 db.openWithPassword('strongPasswordWow', function(err){
@@ -69,7 +71,10 @@ window.plugins.nodefs.init(function(err){
 
     var fs = window.plugins.nodefs(window._fs);
 
-    //If you have installed cordova-plugin-scrypt
+    //Try to use MiniSodium, fallback to libsodium.js
+    Lawncipher.init('?minisodium?');
+
+    //Optional call. If you have installed cordova-plugin-scrypt. Redundant if MiniSodium is available
     Lawncipher.useCordovaPluginScrypt();
 
     var db = new Lawncipher.db('path/to/my/db', fs);

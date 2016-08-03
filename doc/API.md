@@ -1,5 +1,12 @@
 # Lawncipher API
 
+## `Lawncipher.init([cryptoProviderName])`
+Lawncipher initialization method. Must be called once before beginning to use Lawncipher databases and collections.
+* `String cryptoProviderName` : optional. the name of the library that will provide the cryptographic operations. Allowed values are:
+  - `"minisodium"` : to use [cordova-plugin-minisodium](https://github.com/LockateMe/cordova-plugin-minisodium). Throws an exception if `MiniSodium` is missing
+  - `"?minisodium?"` : to try to use cordova-plugin-minisodium, falls back to libsodium.js if MiniSodium is missing
+  - `"libsodium"`, `"sodium"`, `"nacl"` to use libsodium.js
+
 ## `new Lawncipher.db(rootPath, [fs])`
 Constructor method
 * `String rootPath` : root Lawncipher directory path
@@ -7,6 +14,7 @@ Constructor method
 
 ## `Lawncipher.useCordovaPluginScrypt()`
 Call this function to tell Lawncipher to use [cordova-plugin-scrypt](https://github.com/Crypho/cordova-plugin-scrypt) when it needs to derive passwords into encryption keys. To be called only if the scrypt plugin is installed.
+__NOTE:__ Although you can use `crypto-plugin-scrypt` in addition to `cordova-plugin-minisodium`, it is however redundant.
 
 ## `Lawncipher.setScryptProvider(scryptProvider, useAsynchronously)`
 * Function|String scryptProvider. The function that will be used as scrypt provider. The function must have the following interface : (String password, Uint8Array salt, Number opsLimit, Number r, Number p, Number keyLength, [Function callback(err, derivedKey)]). To reset the provider to the default one (using libsodium.js), pass `'default'` or `'reset'` instead of a function.
@@ -50,7 +58,7 @@ Save a document/blob in the current collection.
 * `Doc doc` : The document to be saved.  
 `Doc` is either of type `String`, `Uint8Array` or `Object`.  
 If it is a `String` or a `Uint8Array` or an `Array`, it is saved as a blob, and it is only retrievable with the docId passed in the callback `cb` function.  
-If it is an `Object`, there are two modes available:  
+If it is a "standard" `Object` (key-value mapping object), there are two modes available:  
   - Explicit mode: tell Lawncipher what is to be stored as blob (the value of the `__blob` attribute), what to be stored as index data (the value of the `__index` attribute), and what is the doc's TTL. When using that mode, at least one of `__index` and `__blob` must be defined. `__ttl` is optional. Example `doc`:
   ```js
   {__blob: 'Hello world', __index: {attr1: value1, attr2: value2, ...}, __ttl: 5000}
