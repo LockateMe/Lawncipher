@@ -3,6 +3,8 @@ var Lawncipher = require('../');
 var to_string = Lawncipher.to_string;
 var from_string = Lawncipher.from_string;
 
+Lawncipher.init();
+
 var sodium = require('libsodium-wrappers');
 var ls_to_string = sodium.to_string;
 var ls_from_string = sodium.from_string;

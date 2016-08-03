@@ -2,6 +2,8 @@ var assert = require('assert');
 var Lawncipher = require('../');
 var Long = require('long');
 
+Lawncipher.init();
+
 var sodium = require('libsodium-wrappers');
 var to_hex = sodium.to_hex, from_hex = sodium.from_hex;
 

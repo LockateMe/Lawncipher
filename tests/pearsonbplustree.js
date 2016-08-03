@@ -6,6 +6,8 @@ var faker = require('faker');
 var sodium = require('libsodium-wrappers');
 var to_hex = sodium.to_hex, from_hex = sodium.from_hex;
 
+Lawncipher.init();
+
 var deepObjectEquality = Lawncipher.deepObjectEquality;
 
 var runMega = process.argv.length > 2 && process.argv[2] == 'mega';

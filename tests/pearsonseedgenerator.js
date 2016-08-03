@@ -1,5 +1,6 @@
 var assert = require('assert');
 var Lawncipher = require('../');
+Lawncipher.init();
 
 var yell = process.argv.length > 2 && process.argv[2] == 'verbose';
 

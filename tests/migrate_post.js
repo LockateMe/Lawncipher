@@ -2,6 +2,7 @@ var fs = require('fs');
 var path = require('path');
 //Loading Lawncipher next-gen
 var Lawncipher = require('../lawncipher.js');
+Lawncipher.init();
 
 var assert = require('assert');
 

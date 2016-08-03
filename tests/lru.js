@@ -1,5 +1,6 @@
 var assert = require('assert');
 var Lawncipher = require('../');
+Lawncipher.init();
 
 var LRUStringSet = Lawncipher.LRUStringSet;
 

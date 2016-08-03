@@ -5,6 +5,8 @@ var Lawncipher = require('../');
 var Long = require('long');
 var faker = require('faker');
 
+Lawncipher.init();
+
 var runMega = process.argv.length > 2 && process.argv[2] == 'mega';
 
 var mkdirp = require('mkdirp');

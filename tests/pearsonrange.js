@@ -2,6 +2,8 @@ var assert = require('assert');
 var Lawncipher = require('../');
 var Long = require('long');
 
+Lawncipher.init();
+
 var maxRangeString = '0000000000000000_ffffffffffffffff';
 var lowEnd = new Long(0x00000000, 0x00000000, true);
 var highEnd = new Long(0xFFFFFFFF, 0xFFFFFFFF, true);

@@ -100,6 +100,8 @@
 
 		if (finalCallback && typeof finalCallback != 'function') throw new TypeErorr('when defined, final callback must be a function');
 
+		Lawncipher.init('?MiniSodium?');
+
 		var db = new Lawncipher.db(dbPath, fs);
 		var collections = {};
 		var docs = {};
@@ -219,7 +221,7 @@
 				message: 'Closing DB'
 			},
 			{
-				message: 'Re-opening with password',
+				message: 'Re-opening with a random password (expected failure)',
 				password: randomPassword(12),
 				expectedFailure: true
 			},
