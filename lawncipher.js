@@ -1520,7 +1520,7 @@
 			/*
 			* Methods to manage index models
 			* Practical note : we discourage the use of setIndexModel
-			* on a non-empty collection, especially if it of non-negligeable
+			* on a non-empty collection, especially if it has a non-negligeable
 			* size. Such call will force Lawncipher to adapt each and every
 			* document in the colection to the new indexModel
 			*/
@@ -1643,9 +1643,82 @@
 
 				var indexValidationResult = validateIndexModel(indexModel);
 				if (indexValidationResult){
-					cb(new Error('Invalid index model' + indexValidationResult));
+					cb(new Error(indexValidationResult));
 					return;
 				}
+
+				if (deepObjectEquality(indexModel, collectionIndexModel)){
+					//If the indexModel is equal to the collectionIndexModel, then indexModel HAS to be compatible. (Transitivity)
+					cb(undefined, true);
+					return;
+				}
+
+				//Detect the fields that are already unique and the one that determines documents' IDs
+				var currentIdField;
+				var currentUniqueFields;
+
+				if (collectionIndexModel){
+					for (var indexField in collectionIndexModel){
+						if (collectionIndexModel[indexField].id) currentIdField = indexField;
+						else if (collectionIndexModel[indexField].unique) ((currentUniqueFields && currentUniqueFields.push(indexField)) || currentUniqueFields.push(indexField));
+					}
+				}
+
+				//Detect the field that will need to become unique or that will determine the document IDs
+				var idField;
+				var uniqueFields = [];
+
+				for (var indexField in indexModel){
+					if (indexModel[indexField].id) idField = indexField;
+					else if (indexModel[indexField].unique) uniqueFields.push(indexField);
+				}
+
+				//Detect unicity and id changes
+				if (currentIdField !== idField){
+					console.error('Modifying which field is the "Id" field is currently forbidden and unsupported in Lawncipher. Watch out for future releases...');
+					cb('ID_FIELD_MODIFICATION_FORBIDDEN');
+					return;
+				}
+
+				//Detecting unicity flags changes
+				var uniqueFieldsAdditions = [];
+				var uniqueFieldsDeletions = [];
+
+				//Detecting unicity deletion
+				for (var i = 0; i < currentUniqueFields.length; i++){
+					var currentUniqueField = currentUniqueFields[i];
+					var currentFieldFound = false;
+					for (var j = 0; j < uniqueFields.length; j++){
+						if (uniqueFields[j] == currentUniqueField){
+							currentFieldFound = true;
+							break;
+						}
+					}
+
+					if (!currentFieldFound) uniqueFieldsDeletions.push(currentUniqueField);
+				}
+
+				//Detecting unicity addition
+				for (var i = 0; i < uniqueFields.length; i++){
+					var newUniqueField = uniqueFields[i];
+					var newFieldFound = false;
+					for (var j = 0; j < currentUniqueFields.length; j++){
+						if (currentUniqueFields[j] == newUniqueField){
+							newFieldFound = true;
+							break;
+						}
+					}
+
+					if (!newFieldFound) uniqueFieldsAdditions.push(newUniqueField);
+				}
+
+				/*if (currentIdField && idField && currentIdField != idField){
+					cb(new Error('ID_FIELD_CHANGE_FORBIDDEN'));
+					return;
+				} else if (currentIdField && !idField){
+					cb(new Error('ID_FIELD_REMOVAL_FORBIDDEN'));
+					return;
+				}*/
 
 				var indexNodeIterator = collectionIndex.nodeIterator();
 				var currentNode;
@@ -1695,9 +1768,9 @@
 						*/
 						var typeMismatches = [];
 						var validationResult = validateIndexAgainstModel(currentDoc, indexModel);
-						while (typeof validationResult == 'string'){ //validationResult contains the name
+						while (typeof validationResult == 'string'){ //validationResult contains the name of the offending field
 							if (typeMismatches.length == 0){
-								//First mismatch detected for the currentDoc -> clone(currentDoc);
+								//First mismatch detected for the currentDoc -> clone(currentDoc) (because there is no object immutability in JS, unless you force it...);
 								currentDoc = clone(currentDoc);
 							}
 							delete currentDoc[validationResult];
@@ -1714,8 +1787,13 @@
 						}
 					}
 
-					//Verifying field/id unicity
+					/* Verifying field/id unicity
+					* For each added field, check unicity for that field
+					* For each removed field,... well there is nothing to do...
+					*/
 
+
+					nextNode();
 				}
 
 				function nextNode(){
@@ -1730,7 +1808,7 @@
 							processNode();
 						});
 					} else {
-						cb(undefined, offendingDocsCount == 0, offendingDocs);
+						cb(undefined, offendingDocsCount === 0, offendingDocs);
 					}
 				}
 
@@ -1874,7 +1952,7 @@
 												return;
 											}
 
-											checkFieldsUniticy();
+											checkFieldsUnicity();
 										});
 									} else {
 										cb('DUPLICATE_ID');
@@ -1885,15 +1963,15 @@
 							});
 						} else {
 							//If there are `unique` fields or marked as `id`, then check for unicity before saving the doc
-							if ((docId && uniqueId) || uniqueFields.length > 0) checkFieldsUniticy();
+							if ((docId && uniqueId) || uniqueFields.length > 0) checkFieldsUnicity();
 							else save(); //Otherwise, save the doc now
 						}
 
-						function checkFieldsUniticy(){
+						function checkFieldsUnicity(){
 							var fieldIndex = 0;
 
 							function checkOneField(){
-								checkFieldIsUnique(uniqueFields[fieldIndex], function(err, isUnique){
+								checkFieldIsUnique(uniqueFields[fieldIndex], indexData[fieldIndex], function(err, isUnique){
 									if (err){
 										cb(err);
 										return;
@@ -2146,7 +2224,7 @@
 									var fieldUnicityIndex = 0;
 
 									function checkOneField(){
-										checkFieldIsUnique(uniqueFields[fieldUnicityIndex], function(err, isUnique){
+										checkFieldIsUnique(uniqueFields[fieldUnicityIndex], newIndexData[fieldUnicityIndex], function(err, isUnique){
 											if (err){
 												next(err);
 												return;
@@ -3135,12 +3213,12 @@
 					});
 				} else {
 					function mapUnicitiyCheckFn(doc, emit){
-						if (doc.index[fieldName == value]) emit(doc.id);
+						if (doc.index[fieldName] == value) emit(doc.id);
 					}
 
 					collectionIndex.map(mapUnicitiyCheckFn, function(err, matchedDocs){
 						cb(err, matchedDocs.length <= (postInsert ? 1 : 0));
-					}, 1);
+					}, 1); //Limit the "map search" to one result
 				}
 			}
 
@@ -4400,12 +4478,20 @@
 		});
 	}
 
-	function PearsonHasher(seed, hashLength){
+	function PearsonHasher(seed, hashLength, numberGranularity, dateGranularity){
 		if (!((Array.isArray(seed) || seed instanceof Uint8Array) && seed.length == 256)) throw new TypeError('seed must be an array containing a substitution of integers [0-255]');
 		if (!checkSeedIntegrity()) throw new TypeError('Invalid seed');
 
 		hashLength = hashLength || 8;
 		if (!(typeof hashLength == 'number' && Math.floor(hashLength) == hashLength && hashLength > 0 && hashLength < 9)) throw new TypeError('hashLength must be an integer in the range [1-8]');
+
+		if (numberGranularity){
+			if (!(typeof numberGranularity == 'number' && Math.round(numberGranularity) == numberGranularity && numberGranularity > 0)) throw new TypeError('when defined, numberGranularity must be a strictly positive integer number');
+		} else numberGranularity = 1; //By default, round to the nearest unit
+
+		if (dateGranularity){
+			if (!(typeof dateGranularity == 'number' && Math.floor(dateGranularity) == dateGranularity && dateGranularity > 0)) throw new TypeError('when defined, dateGranularity must be a strictly positive integer number')
+		} else dateGranularity = 1000; //By default, round to the nearest 1000ms (= to the nearest second)
 
 		function checkSeedIntegrity(){
 			var seedSet = {};
@@ -4420,10 +4506,22 @@
 			return true;
 		}
 
-		return function(d){
-			if (!((d instanceof Uint8Array || typeof d == 'string') && d.length > 0)) throw new TypeError('data must be either a Uint8Array or a string');
-			if (typeof d == 'string') d = from_string(d);
+		return function(d, retrievalMode){
+			checkHashable(d);
+			//Type conversions. Beware : the order here matters a lot...
+			//Converts all the supported types to a Uint8Array
+			if (d instanceof Date){
+				//Converts date to a number (then to a string), rounds the requested granularity (to the nearest second by default)
+				d = (Math.round(d.getTime() / dateGranularity) * dateGranularity).toString();
+			} else if (typeof d == 'number'){
+				//Converts rounding the number with the requested granularity and converting it to a string
+				if (numberGranularity != 1) d = (Math.round(d / numberGranularity) * numberGranularity).toString();
+				else d = Math.round(d).toString(); //Dodging the "divide-multiply by 1" operations if numberGranularity == 1
+			}
 
+			if (typeof d == 'string') d = from_string(d); //Converting the string to a Uint8Array
+
+			//Pearson hashing loop
 			var hash = new Uint8Array(hashLength);
 			var i = 0, j = 0;
 			for (var j = 0; j < hashLength; j++){
@@ -4737,10 +4835,6 @@
 			return rootNode.lookupRange(fRange);
 		};
 
-		/*self.getDistribution = function(){
-
-		};*/
-
 		/**
 		* @private
 		* @param {String} evName - name of the event
@@ -4755,6 +4849,17 @@
 			for (var i = 0; i < currentEvHandlers.length; i++){
 				currentEvHandlers[i].apply(undefined, args);
 			}
+		}
+
+		/**
+		* @private
+		* Check that the parameter is a "hashable type"
+		* @param {String|Number|Date|Boolean|Uint8Array} d - the data to be hashed
+		* @returns {Boolean}
+		*/
+		function checkHashable(d){
+			var td = typeof d;
+			if (!((d instanceof Uint8Array || td == 'string') && d.length > 0) && !(td == 'number' || td == 'boolean') && !(d instanceof Date)) throw new TypeError('data must be either a Uint8Array, a string, a date or a number');
 		}
 
 		/**
@@ -5145,9 +5250,7 @@
 		self.TreeNode = TreeNode;
 
 		function hashToLong(d){
-			if (typeof d == 'string'){
-				d = from_string(d);
-			}
+			//Type conversions and checks are now done by hasher()
 			return bufferBEToLong(hasher(d));
 		}
 
