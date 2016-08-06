@@ -10,6 +10,7 @@ Building a rather versatile and persistent encrypted document storage.
 
 * Lawncipher is a document store
 * The entirety of Lawncipher data is encrypted using either a password or a 256-bit key. (In case a password is used, it is transformed into a 256-bit root key using [scrypt](http://www.tarsnap.com/scrypt.html))
+* The security limits and precautions of Lawncipher are listed in the [threat model](https://github.com/LockateMe/Lawncipher/blob/master/doc/ThreatModel.md).
 * Instead of tables containing rows, Lawncipher has collections containing documents
 * A document in Lawncipher has a unique ID and at least one of these two things:
     * A blob : could a JSON object, a string or arbitrary binary data (in a `Uint8Array`). It is stored encrypted and stored in a dedicated file, and decrypted when retrieved from the collection.
@@ -18,7 +19,6 @@ Building a rather versatile and persistent encrypted document storage.
 * A schema, called ["Index model"](https://github.com/LockateMe/Lawncipher/blob/master/doc/IndexModel.md), can be set for the indexData in a given collection. This schema gives the list and type of attributes that will be stored in the index. It can also determine whether a given attribute gives the IDs to the documents of the collection; as well as whether the value of a given attribute must be unique across the collection (without giving document IDs).
 * When inserting a document, if a JSON object is given, the indexData can be [implicitly extracted from the document](https://github.com/LockateMe/Lawncipher/blob/master/doc/API.md#collectionsavedoc-cb-overwrite-ttl).
 * A document can be forced to expire, using TTLs (Time-to-live)
-* The security limits and precautions of Lawncipher are listed in the [threat model](https://github.com/LockateMe/Lawncipher/blob/master/doc/ThreatModel.md).
 
 ## Getting started
 
