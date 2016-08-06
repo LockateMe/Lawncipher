@@ -4478,6 +4478,9 @@
 		});
 	}
 
+	/**
+	* Get the adapted Pearson hashing function
+	*/
 	function PearsonHasher(seed, hashLength, numberGranularity, dateGranularity){
 		if (!((Array.isArray(seed) || seed instanceof Uint8Array) && seed.length == 256)) throw new TypeError('seed must be an array containing a substitution of integers [0-255]');
 		if (!checkSeedIntegrity()) throw new TypeError('Invalid seed');
@@ -4542,6 +4545,7 @@
 					the index of an odd seed value if d == true, and
 					the index of an even seed value if d == false
 					*/
+					var hash = new Uint8Array(8);
 					var distributed = false;
 					var rIndex = 0;
 					var r, currentSeedPosition, currentSeedVal;
@@ -4553,13 +4557,9 @@
 						rIndex = (rIndex + 1) % 8;
 					}
 					//Building the hash
-					var hashStart = currentSeedVal;
+					hash[0] = currentSeedVal;
 					var hashEnd = randomBuffer(7);
-					var hash = new Uint8Array(8);
-					hash[0] = hashStart;
-					for (var i = 0; i < 7; i++){
-						hash[i+1] = hashEnd[i];
-					}
+					for (var i = 0; i < 7; i++) hash[i+1] = hashEnd[i];
 
 					return hash;
 				} else {
