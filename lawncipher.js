@@ -4509,6 +4509,24 @@
 			return true;
 		}
 
+		var booleanTrueRanges = new Array(128);
+		var booleanFalseRanges = new Array(128);
+		var boolTrueCount = 0, boolFalseCount = 0;
+
+		for (var i = 0; i < seed.length; i++){
+			var i16 = i.toString(16);
+			var currentRange = PearsonRange.fromString(i16) + '00000000000000_' + i16 + 'ffffffffffffff');
+			if (seed[i] % 2 == 1){
+				booleanTrueRanges[boolTrueCount] = currentRange;
+				boolTrueCount++;
+			} else {
+				booleanFalseRanges[boolFalseCount] = currentRange;
+				boolFalseCount++;
+			}
+		}
+
+		if (!(boolTrueCount == 128 && boolFalseCount == 128)) console.error('Internal fatal error: checkSeedIntegrity() didn\'t detect a ')
+
 		return function(d, isLookup){
 			var td = checkHashable(d);
 
@@ -4568,25 +4586,8 @@
 					If b == false, lookup indices of even seed values
 					*/
 
-					var rangeBeginnings = new Array(128);
-					var rangeBeginningsCount = 0;
-
-					for (var i = 0; i < seed.length; i++){
-						if (!!(seed[i] % 2 == 1) == b){
-							rangeBeginnings[rangeBeginningsCount] = i;
-							rangeBeginningsCount++;
-						}
-					}
-
-					if (rangeBeginningsCount != 128) console.error('Assertion failed on boolean value lookup: rangeBeginningsCount != 128');
-
-					var ranges = new Array(128);
-					for (var i = 0; i < rangeBeginnings.length; i++){
-						var currentRangeStart = rangeBeginnings[i].toString('16');
-						ranges[i] = PearsonRange.fromString(currentRangeStart + '00000000000000_' + currentRangeStart + 'ffffffffffffff');
-					}
-
-					return ranges;
+					if (b == true) return booleanTrueRanges;
+					else return booleanFalseRanges;
 				}
 			}
 		}
