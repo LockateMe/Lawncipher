@@ -58,24 +58,3 @@ The object that describes a document in the index
     ttl: Time-to-live for the document. Unixepoch, in seconds. Optional
 }
 ```
-
-## Document/index model (`indexModel`):
-
-Two versions possible:
-* You provide an object describing field to be extracted/provided by the user, to be inserted in the index file of the collection. You can define which field values must be unique and which one will be chosen as docId
-* You provide an array of strings, where each string is a field name. Each field will be extracted from the document on insertion. Note that with this method, you cannot choose which field must have unique values nor can you set the document ID (a random one will be generated)
-
-`indexModel` object:
-
-```
-{
-	fieldName: {type: 'typeName', unique: true||false, id: true||false, index: true||false},
-	...
-}
-```
-
-Notes:
-* `type` must be equal to one of the following : 'string', 'date', 'number', 'boolean', 'object', 'array', 'buffer', '\*'
-* `unique` and `id` parameters are optional. If not defined, they are then assumed as `false`
-* a field set as `id` is also implicitly unique
-* you can only set one field as ID. If you transgress this rule, the collection construction will return an error
