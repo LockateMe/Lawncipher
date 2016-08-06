@@ -4506,32 +4506,89 @@
 			return true;
 		}
 
-		return function(d, retrievalMode){
-			checkHashable(d);
-			//Type conversions. Beware : the order here matters a lot...
-			//Converts all the supported types to a Uint8Array
-			if (d instanceof Date){
-				//Converts date to a number (then to a string), rounds the requested granularity (to the nearest second by default)
-				d = (Math.round(d.getTime() / dateGranularity) * dateGranularity).toString();
-			} else if (typeof d == 'number'){
-				//Converts rounding the number with the requested granularity and converting it to a string
-				if (numberGranularity != 1) d = (Math.round(d / numberGranularity) * numberGranularity).toString();
-				else d = Math.round(d).toString(); //Dodging the "divide-multiply by 1" operations if numberGranularity == 1
-			}
+		return function(d, isLookup){
+			var td = checkHashable(d);
 
-			if (typeof d == 'string') d = from_string(d); //Converting the string to a Uint8Array
-
-			//Pearson hashing loop
-			var hash = new Uint8Array(hashLength);
-			var i = 0, j = 0;
-			for (var j = 0; j < hashLength; j++){
-				var hashByte = seed[(d[0] + j) % 256];
-				for (var i = 1; i < d.length; i++){
-					hashByte = seed[(hashByte ^ d[i])];
+			if (td != 'boolean'){ //Non-boolean hashing : Pearson function using type casting
+				//Type conversions. Beware : the order here matters a lot...
+				//Converts all the supported types to a Uint8Array
+				if (td == 'date'){
+					//Converts date to a number (then to a string), rounds the requested granularity (to the nearest second by default)
+					d = (Math.round(d.getTime() / dateGranularity) * dateGranularity).toString();
+				} else if (td == 'number'){
+					//Converts rounding the number with the requested granularity and converting it to a string
+					if (numberGranularity != 1) d = (Math.round(d / numberGranularity) * numberGranularity).toString();
+					else d = Math.round(d).toString(); //Dodging the "divide-multiply by 1" operations if numberGranularity == 1
 				}
-				hash[j] = hashByte;
+
+				//Converting the string to a Uint8Array
+				if (td == 'string') d = from_string(d);
+
+				//Pearson hashing loop
+				var hash = new Uint8Array(hashLength);
+				var i = 0, j = 0;
+				for (var j = 0; j < hashLength; j++){
+					var hashByte = seed[(d[0] + j) % 256];
+					for (var i = 1; i < d.length; i++){
+						hashByte = seed[(hashByte ^ d[i])];
+					}
+					hash[j] = hashByte;
+				}
+				return hash;
+			} else {
+				if (!isLookup){
+					/* Hash a boolean value
+					The start of the 8-byte hash of a boolean value is
+					the index of an odd seed value if d == true, and
+					the index of an even seed value if d == false
+					*/
+					var distributed = false;
+					var rIndex = 0;
+					var r, currentSeedPosition, currentSeedVal;
+					while (!distributed){
+						if (rIndex == 0) r = randomBuffer(8);
+						currentSeedPosition = r[rIndex];
+						currentSeedVal = seed[currentSeedPosition];
+						distributed = !!(currentSeedVal % 2 == 1) == d;
+						rIndex = (rIndex + 1) % 8;
+					}
+					//Building the hash
+					var hashStart = currentSeedVal;
+					var hashEnd = randomBuffer(7);
+					var hash = new Uint8Array(8);
+					hash[0] = hashStart;
+					for (var i = 0; i < 7; i++){
+						hash[i+1] = hashEnd[i];
+					}
+
+					return hash;
+				} else {
+					/* Get the ranges that contain the searched for boolean value
+					If b == true, lookup indices of odd seed values
+					If b == false, lookup indices of even seed values
+					*/
+
+					var rangeBeginnings = new Array(128);
+					var rangeBeginningsCount = 0;
+
+					for (var i = 0; i < seed.length; i++){
+						if (!!(seed[i] % 2 == 1) == b){
+							rangeBeginnings[rangeBeginningsCount] = i;
+							rangeBeginningsCount++;
+						}
+					}
+
+					if (rangeBeginningsCount != 128) console.error('Assertion failed on boolean value lookup: rangeBeginningsCount != 128');
+
+					var ranges = new Array(128);
+					for (var i = 0; i < rangeBeginnings.length; i++){
+						var currentRangeStart = rangeBeginnings[i].toString('16');
+						ranges[i] = PearsonRange.fromString(currentRangeStart + '00000000000000_' + currentRangeStart + 'ffffffffffffff');
+					}
+
+					return ranges;
+				}
 			}
-			return hash;
 		}
 	}
 
@@ -4860,6 +4917,14 @@
 		function checkHashable(d){
 			var td = typeof d;
 			if (!((d instanceof Uint8Array || td == 'string') && d.length > 0) && !(td == 'number' || td == 'boolean') && !(d instanceof Date)) throw new TypeError('data must be either a Uint8Array, a string, a date or a number');
+
+			if (td == 'object'){
+				if (d instanceof Uint8Array) td = 'uint8array';
+				else if (d instanceof Date) td = 'date';
+				else throw new Error('checkHashable is broken!');
+			}
+
+			return td;
 		}
 
 		/**
