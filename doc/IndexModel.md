@@ -19,7 +19,7 @@ Here is an `indexModel` object:
 
 Each indexed field has a description. Here are some details about that description
 * In an indexModel, you can only set one field as `id`. If you transgress this rule, the collection construction will return an error
-* `type` must be equal to one of the following : `string`, `date`, `number`, `boolean`, `object`, `array`, `buffer`, `\*`
+* `type` must be equal to one of the following : `string`, `date`, `number`, `boolean`, `object`, `array`, `buffer`, `*`
 * `unique` and `id` parameters are optional. If not defined, they are then assumed as `false`
 * If you do not need to set more than the `type` in a field's description, then you can replace `yourFieldName: {type: "yourSelectedType"}` by `yourFieldName: "yourSelectedType"`
 * a field marked as `id: true` is also implicitly `unique: true`
