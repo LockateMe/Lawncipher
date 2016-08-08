@@ -3480,10 +3480,26 @@
 		if (typeof source != 'object') return source;
 		if (target && typeof target != 'object') throw new TypeError('when defined, target must be an object');
 
-		var c = target || {};
-		var sourceAttr = Object.keys(source);
-		for (var i = 0; i < sourceAttr.length; i++) c[sourceAttr[i]] = source[sourceAttr[i]];
-		return c;
+		if (Array.isArray(source)){
+			var c;
+			if (target){
+				if (!Array.isArray(target)) throw new TypeError('if source is an array, then target must also be an array');
+				c = target;
+				for (var i = 0; i < source.length; i++){
+					if (i < c.length) c[i] = source[i];
+					else c.push(source[i]);
+				}
+			} else {
+				var c = new Array(source.length);
+				for (var i = 0; i < source.length; i++) c[i] = source[i];
+			}
+			return c;
+		} else {
+			var c = target || {};
+			var sourceAttr = Object.keys(source);
+			for (var i = 0; i < sourceAttr.length; i++) c[sourceAttr[i]] = source[sourceAttr[i]];
+			return c;
+		}
 	}
 
 	/*
@@ -3845,7 +3861,7 @@
 		return bCopy;
 	}
 
-	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, loadCallback, _maxLoadedDataSize, _maxNodeSize){
+	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, loadCallback, _maxLoadedDataSize, _maxNodeSize, _booleanMode){
 		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('collectionName must be a non-empty string');
 		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('indexName must be a non-empty string');
 		if (!(collectionKey instanceof Uint8Array && collectionKey.length == 32)) throw new TypeError('collectionKey must be a 32-byte Uint8Array');
@@ -3898,7 +3914,7 @@
 
 		/*
 			The rough (inaccurate) memory usage threshold for the index,
-			before it starts dynamic data loading
+			before it starts using dynamic data loading
 			// 50MB = 50 * 1024 * 1024 = 52428800 ?? What default value should we assign to this??
 		*/
 		var maxDataLoad = _maxLoadedDataSize || 52428800;
@@ -3913,8 +3929,8 @@
 		var theHasher = PearsonHasher(pearsonSeed);
 		var theTree = new PearsonBPlusTree(theHasher, _maxNodeSize || 53248, !attributeIndex); //Key collisions are disallowed on attribute/searchIndex
 
-		var hashToLong = function(s){
-			return bufferBEToLong(theHasher(s));
+		var hashToLong = function(s, isLookup){
+			return bufferBEToLong(theHasher(s, isLookup), isLookup);
 		};
 
 		theTree.on('change', function(dRange, d){
@@ -3979,40 +3995,103 @@
 		});
 
 		self.lookup = function(key, cb){
-			if (!(typeof key == 'string' || typeof key == 'number')) throw new TypeError('key must be a string or a number');
 			if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
-			var keyHash = hashToLong(key);
+			if (_booleanMode && typeof key != 'boolean'){
+				cb(new TypeError(''));
+				return;
+			}
+			//Key type check is done in hasher, so it's implicitly done in hashToLong
+			var keyHash = hashToLong(key, true); //Lookup is on == true
+			if (_booleanMode){
+				//keyHash is an array of ranges
+				//Tree lookup method must be able to take key ranges
+				//And we should load unloaded ranges
+				var keyHashIndex = 0;
 
-			var inTreeValue = theTree.lookup(key, keyHash);
+				var matchedValues = [];
 
-			/*
-				If inTreeValue is defined, then we have found what we are looking for
+				function processOne(isLoaded){
+					var currentSubRange = keyHash[keyHashIndex];
+					if (isLoaded || isRangeLoaded(currentSubRange)){
+						var inTreeUnfilteredSubset = theTree.lookupRange(currentSubRange).getBinnedRange().subCollection;
 
-				If it is not defined, then we have to check that the corresponding data
-				range is loaded in memory. In case it is not loaded in memory, load it
-				and lookup again.
-			*/
-			if (!inTreeValue && !isRangeOfHashLoaded(keyHash)){
-				loadIndexFragmentForHash(keyHash, function(err){
-					if (err){
-						cb(err);
-						return;
+						var inTreeSubset = [];
+
+						var subsetKeys = Object.keys(inTreeUnfilteredSubset);
+						for (var i = 0; i < subsetKeys.length; i++){
+							var reversed = theHasher.reverse(subsetKeys[i]);
+							if (reversed === key) inTreeSubset.push(inTreeUnfilteredSubset[subsetKeys[i]]);
+						}
+
+						for (var i = 0; i < inTreeSubset.length; i++){
+							var currentVal = inTreeSubset[i];
+							if (typeof currentVal == 'string') inTreeSubset.push(currentVal);
+							else if (Array.isArray(currentVal)){
+								for (var j = 0; j < currentVal.length; j++){
+									inTreeSubset.push(currentVal[j]);
+								}
+							}
+						}
+
+						next();
+					} else {
+						loadIndexFragment(findRangeOfRange(currentSubRange), function(err){
+							if (err){
+								cb(err);
+								return;
+							}
+
+							//Re-process the same subrange, now that it has been loaded
+							processOne(true);
+						});
 					}
+				}
 
-					//Data range usage doesn't "need" to be marked in this case, because loadIndexFragmentForHash does it, through loadIndexFragment
-					inTreeValue = theTree.lookup(key, keyHash);
-					cb(undefined, inTreeValue);
-				});
+				function next(){
+					keyHashIndex++;
+					if (keyHashIndex == keyHash.length) cb(undefined, matchedValues);
+					else processOne();
+				}
+
 			} else {
-				markUsageOfHash(keyHash);
-				cb(undefined, inTreeValue);
+				var inTreeValue = theTree.lookup(key, keyHash);
+
+				/*
+					If inTreeValue is defined, then we have found what we are looking for
+
+					If it is not defined, then we have to check that the corresponding data
+					range is loaded in memory. In case it is not loaded in memory, load it
+					and lookup again.
+				*/
+				if (!inTreeValue && !isRangeOfHashLoaded(keyHash)){
+					loadIndexFragmentForHash(keyHash, function(err){
+						if (err){
+							cb(err);
+							return;
+						}
+
+						//Data range usage doesn't "need" to be marked in this case, because loadIndexFragmentForHash does it, through loadIndexFragment
+						inTreeValue = theTree.lookup(key, keyHash);
+						cb(undefined, inTreeValue);
+					});
+				} else {
+					markUsageOfHash(keyHash);
+					cb(undefined, inTreeValue);
+				}
 			}
 		};
 
 		self.add = function(key, value, cb, noTrigger, replace){
 			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
+
+			if (_booleanMode && typeof key != 'boolean'){
+				cb(new TypeError('When _booleanMode == true, key must be a boolean'));
+				return;
+			}
+
 			//We must check that the range that corresponds to the key is currently loaded
+			//Key type check is done in hasher, so it's implicitly done in hashToLong
 			var keyHash = hashToLong(key);
 
 			//Check that data range is loaded before performing the addition
@@ -4024,11 +4103,21 @@
 						return;
 					}
 
-					theTree.add(key, value, noTrigger, replace);
+					if (!_booleanMode){
+						theTree.addWithHash(key, value, noTrigger, replace, keyHash);
+					} else {
+						theTree.addWithHash(longToHex(keyHash), value, noTrigger, replace, keyHash); //Use keyHash as hash (for data distribution) and storage (as identifier)
+					}
+
 					if (cb) cb();
 				});
 			} else {
-				theTree.add(key, value, noTrigger, replace);
+				if (!_booleanMode){
+					theTree.addWithHash(key, value, noTrigger, replace, keyHash);
+				} else {
+					theTree.addWithHash(longToHex(keyHash), value, noTrigger, replace, keyHash);
+				}
+
 				if (cb) cb();
 			}
 		};
@@ -4036,23 +4125,98 @@
 		self.remove = function(key, value, cb, noTrigger){
 			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
 			//We must check that the range that corresponds to the key is currently loaded
-			var keyHash = hashToLong(key);
+			//Key type check is done in hasher, so it's implicitly done in hashToLong
 
-			//Check that the data range is loaded before performing the removal
-			if (!isRangeOfHashLoaded(keyHash)){
-				loadIndexFragmentForHash(keyHash, function(err){
-					if (err){
-						if (cb) cb(err);
-						else throw err;
-						return;
-					}
+			//But we have to explicitly check that typeof key == 'boolean' if _booleanMode == true
+			if (_booleanMode && typeof key != 'boolean'){
+				var e = new TypeError('When _booleanMode == true, key must be a boolean');
+				if (cb) cb(e);
+				else throw e;
+				return;
+			}
 
+			var keyHash = hashToLong(key, true); //Lookup mode: on
+
+			if (!_booleanMode){
+				//Check that the data range is loaded before performing the removal
+				if (!isRangeOfHashLoaded(keyHash)){
+					loadIndexFragmentForHash(keyHash, function(err){
+						if (err){
+							if (cb) cb(err);
+							else throw err;
+							return;
+						}
+
+						theTree.remove(key, value, noTrigger);
+						if (cb) cb();
+					});
+				} else {
 					theTree.remove(key, value, noTrigger);
 					if (cb) cb();
-				});
+				}
 			} else {
-				theTree.remove(key, value, noTrigger);
-				if (cb) cb();
+				//TODO: Use removeWithHash, in addition to the boolean special case where key = keyHash
+				//Or should we perform a lookup, that returns us the stored hashes, that we then remove?
+
+				//Iterate on each node of the tree
+				var hashRanges = keyHash;
+				var treeTraveler = self.nodeIterator();
+				var currentNode;
+
+				function processOne(){
+					var currentDataSubset = currentNode.getBinnedRange('none');
+
+					//For each node, build the list of subranges of the data to be deleted
+					//These subranges to be deleted are removed from hashRanges, since you won't need them afterwards
+					var currentRangesToDelete = [];
+					for (var i = 0; i < hashRanges.length; i++){
+						if (hashRanges[i].isContainedIn(currentDataSubset.range)){
+							currentRangesToDelete.push(hashRanges[i]);
+							hashRanges.splice(i, 1);
+							i--;
+						}
+					}
+
+					//For each of the node's key-value pair, if it is part of any of the "subranges to be deleted", delete it from the tree
+					var currentHashesToDelete = [];
+					var subCollectionKeys = Object.keys(currentDataSubset.subCollection);
+					for (var i = 0; i < subCollectionKeys.length; i++){
+						var currentHashLong = hexToLong(subCollectionKeys[i]);
+
+						for (var j = 0; j < currentRangesToDelete.length; j++){
+							if (currentRangesToDelete[j].contains(currentHashLong)){
+								currentRangesToDelete.push(currentHashLong);
+								break; //We found the right range. Get out of the range iteration loop
+							}
+						}
+					}
+
+					for (var i = 0; i < currentHashesToDelete.length; i++){
+						//Remove the matched key-value pairs, by passing their hash upfront and triggering the tree event only if we are removing the last element of currentHashesToDelete
+						theTree.remove(key, undefined, currentHashesToDelete.length - 1, currentHashesToDelete[i]);
+					}
+
+					nextNode();
+				}
+
+				function nextNode(){
+					if (treeTraveler.hasNext()){
+						treeTraveler.next(function(err, _n){
+							if (err){
+								if (cb) cb(err);
+								else throw err;
+								return;
+							}
+
+							currentNode = _n;
+							processOne();
+						});
+					} else {
+						if (cb) cb();
+					}
+				}
+
+				nextNode();
 			}
 		};
 
@@ -4066,6 +4230,9 @@
 
 				var thisIterator = this;
 
+				/*
+				* This stateless tree traversal method is definitely not the most efficient way to do it
+				*/
 				this.next = function(cb){
 					if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
@@ -4373,6 +4540,21 @@
 			}
 		}
 
+		function findRangeOfRange(r){
+			if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
+			for (var i = 0; i < fragmentsList.length; i++){
+				if (fragmentsList[i].containsRange(r)) return fragmentsList[i];
+			}
+		}
+
+		function isRangeLoaded(r){
+			var currentLoadedFragmentsList = Object.keys(currentLoadedFragmentsRange);
+			for (var i = 0; i < currentLoadedFragmentsList.length; i++){
+				if (currentLoadedFragmentsRange[currentLoadedFragmentsList[i]].containsRange(r)) return true;
+			}
+			return false;
+		}
+
 		function isRangeOfHashLoaded(h){
 			var currentLoadedFragmentsList = Object.keys(currentLoadedFragmentsRange);
 			for (var i = 0; i < currentLoadedFragmentsList.length; i++){
@@ -4478,12 +4660,25 @@
 		});
 	}
 
+	function checkSeedIntegrity(seed){
+		var seedSet = {};
+		for (var i = 0; i < 256; i++){
+			var currentSeedVal = seed[i];
+			if (!(currentSeedVal >= 0 && currentSeedVal <= 255)) return false;
+			currentSeedVal = currentSeedVal.toString();
+			if (seedSet[currentSeedVal]) return false;
+			seedSet[currentSeedVal] = true;
+		}
+
+		return true;
+	}
+
 	/**
 	* Get the adapted Pearson hashing function
 	*/
 	function PearsonHasher(seed, hashLength, numberGranularity, dateGranularity){
 		if (!((Array.isArray(seed) || seed instanceof Uint8Array) && seed.length == 256)) throw new TypeError('seed must be an array containing a substitution of integers [0-255]');
-		if (!checkSeedIntegrity()) throw new TypeError('Invalid seed');
+		if (!checkSeedIntegrity(seed)) throw new TypeError('Invalid seed');
 
 		hashLength = hashLength || 8;
 		if (!(typeof hashLength == 'number' && Math.floor(hashLength) == hashLength && hashLength > 0 && hashLength < 9)) throw new TypeError('hashLength must be an integer in the range [1-8]');
@@ -4496,26 +4691,13 @@
 			if (!(typeof dateGranularity == 'number' && Math.floor(dateGranularity) == dateGranularity && dateGranularity > 0)) throw new TypeError('when defined, dateGranularity must be a strictly positive integer number')
 		} else dateGranularity = 1000; //By default, round to the nearest 1000ms (= to the nearest second)
 
-		function checkSeedIntegrity(){
-			var seedSet = {};
-			for (var i = 0; i < 256; i++){
-				var currentSeedVal = seed[i];
-				if (!(currentSeedVal >= 0 && currentSeedVal <= 255)) return false;
-				currentSeedVal = currentSeedVal.toString();
-				if (seedSet[currentSeedVal]) return false;
-				seedSet[currentSeedVal] = true;
-			}
-
-			return true;
-		}
-
 		var booleanTrueRanges = new Array(128);
 		var booleanFalseRanges = new Array(128);
 		var boolTrueCount = 0, boolFalseCount = 0;
 
 		for (var i = 0; i < seed.length; i++){
 			var i16 = i.toString(16);
-			var currentRange = PearsonRange.fromString(i16) + '00000000000000_' + i16 + 'ffffffffffffff');
+			var currentRange = PearsonRange.fromString(i16 + '00000000000000_' + i16 + 'ffffffffffffff');
 			if (seed[i] % 2 == 1){
 				booleanTrueRanges[boolTrueCount] = currentRange;
 				boolTrueCount++;
@@ -4525,9 +4707,9 @@
 			}
 		}
 
-		if (!(boolTrueCount == 128 && boolFalseCount == 128)) console.error('Internal fatal error: checkSeedIntegrity() didn\'t detect a ')
+		if (!(boolTrueCount == 128 && boolFalseCount == 128)) console.error('Internal fatal error: checkSeedIntegrity() didn\'t detect the same amount of odd and even values');
 
-		return function(d, isLookup){
+		var hasher = function(d, isLookup){
 			var td = checkHashable(d);
 
 			if (td != 'boolean'){ //Non-boolean hashing : Pearson function using type casting
@@ -4538,8 +4720,8 @@
 					d = (Math.round(d.getTime() / dateGranularity) * dateGranularity).toString();
 				} else if (td == 'number'){
 					//Converts rounding the number with the requested granularity and converting it to a string
-					if (numberGranularity != 1) d = (Math.round(d / numberGranularity) * numberGranularity).toString();
-					else d = Math.round(d).toString(); //Dodging the "divide-multiply by 1" operations if numberGranularity == 1
+					if (numberGranularity == 1) d = Math.round(d).toString(); //Dodging the "divide-multiply by 1" operations if numberGranularity == 1
+					else d = (Math.round(d / numberGranularity) * numberGranularity).toString();
 				}
 
 				//Converting the string to a Uint8Array
@@ -4590,7 +4772,19 @@
 					else return booleanFalseRanges;
 				}
 			}
-		}
+		};
+
+		var reverser = function (hash){
+			if (!(hash instanceof Uint8Array && hash.length == 8) && !(is_hex(hash) && hash.length == 16)) throw new TypeError('hash must be a Uint8Array of length 8 bytes');
+
+			var seedValIndex = hash[0];
+			var seedVal = seed[seedValIndex];
+			return seedVal % 2 == 1; //"True" are distributed with odd values, "false" are distributed with even values
+		};
+
+		hasher.reverse = reverser;
+
+		return hasher;
 	}
 
 	/**
@@ -4722,19 +4916,31 @@
 		* @param {String|Number} key - the key (i.e, identifier) that will be used to retrieve the value from the tree
 		* @param {String|Object|Number} [value] - the data to be stored in the tree for the given key. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the current collection
 		*/
-		self.add = function(key, value, noTrigger, replace){
+		self.add = function(key, value, noTrigger, replace, _withHash){
 			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
 			var valType = typeof value;
 			if (!(valType == 'string' || valType == 'number' || valType == 'object')) throw new TypeError('value must either be a string, a number, or a JSON object');
 
-			rootNode.add(key, value, noTrigger, replace);
+			if (_withHash){
+				if (!(_withHash instanceof Uint8Array && _withHash.length == 8)) throw new TypeError('if _withHash is provided, it must be an 8 byte Uint8Array');
+
+				rootNode.addWithHash(_withHash, key, value, noTrigger, replace);
+			} else {
+				rootNode.add(key, value, noTrigger, replace);
+			}
 		};
 
-		self.remove = function(key, value, noTrigger){
+		self.remove = function(key, value, noTrigger, _withHash){
 			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
-			rootNode.remove(key, value, noTrigger);
+			if (_withHash){
+				if (!(_withHash instanceof Uint8Array && _withHash.length == 8)) throw new TypeError('if _withHash is provided, it must be an 8 byte Uint8Array');
+
+				rootNode.removeWithHash(_withHash, key, value, noTrigger);
+			} else {
+				rootNode.remove(key, value, noTrigger);
+			}
 		};
 
 		/**
@@ -4917,7 +5123,7 @@
 		*/
 		function checkHashable(d){
 			var td = typeof d;
-			if (!((d instanceof Uint8Array || td == 'string') && d.length > 0) && !(td == 'number' || td == 'boolean') && !(d instanceof Date)) throw new TypeError('data must be either a Uint8Array, a string, a date or a number');
+			if (!((d instanceof Uint8Array || td == 'string') && d.length > 0) && !(td == 'number' || td == 'boolean') && !(d instanceof Date)) throw new TypeError('key must be either a Uint8Array, a string, a date, a number or a boolean');
 
 			if (td == 'object'){
 				if (d instanceof Uint8Array) td = 'uint8array';
@@ -5146,6 +5352,13 @@
 			thisNode.lookupRange = function(fRange){
 				if (this.isLeaf()){
 					return this;
+					/*if (this.range().equals(fRange)){
+						return this;
+					} else {
+						var nodeData = this.getBinnedRange();
+						nodeData = nodeData.subCollection;
+
+					}*/
 				} else {
 					if (left.range().containsRange(fRange)){
 						return left.lookupRange(fRange);
@@ -5315,9 +5528,9 @@
 
 		self.TreeNode = TreeNode;
 
-		function hashToLong(d){
+		function hashToLong(d, isLookup){
 			//Type conversions and checks are now done by hasher()
-			return bufferBEToLong(hasher(d));
+			return bufferBEToLong(hasher(d, isLookup), isLookup);
 		}
 
 		function findCommonPrefix(a, b){
@@ -5484,7 +5697,15 @@
 		return this._d.pop();
 	};
 
-	function bufferBEToLong(b){
+	function bufferBEToLong(b, isArrayOfBuffers){
+		if (isArrayOfBuffers){
+			var r = [];
+			for (var i = 0; i < b.length; i++){
+				r.push(bufferBEToLong(b[i]));
+			}
+			return r;
+		}
+
 		var l = 0, h = 0;
 		for (var i = 0; i < 4; i++){
 			h += b[i] * Math.pow(2, 8 * (3 - i));
