@@ -33,3 +33,15 @@ var ph = PearsonHasher(testSeed);
 
 assert(to_hex(ph('test')) == '5ddc2eec38de9927');
 assert(to_hex(ph('hello')) == 'ef8c9f067bbfffa7');
+
+//Numbers
+assert(to_hex(ph(4)) == to_hex(ph(4)));
+assert(to_hex(ph(4)) == to_hex(ph(4.2)));
+assert(to_hex(ph(4)) == to_hex(ph(3.5)));
+assert(to_hex(ph(4)) != to_hex(ph(3.49)));
+
+//Dates
+var n = new Date();
+var nPlusOne = new Date(n.getTime() + 1000);
+assert(to_hex(ph(n)) == to_hex(ph(n)));
+assert(to_hex(ph(n)) != to_hex(ph(nPlusOne)));
