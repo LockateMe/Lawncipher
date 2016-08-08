@@ -1,6 +1,7 @@
 var fs = require('fs');
 var path = require('path')
 var assert = require('assert');
+var crypto = require('crypto');
 var Lawncipher = require('../');
 var Long = require('long');
 var faker = require('faker');
@@ -117,7 +118,7 @@ function basicTests(next){
 }
 
 //A testing method, designed to test save, loading, lookup and removal of a non-negligeable data set
-function loadTests(docCount, cb, usingNoTrigger){
+function loadTests(docCount, cb, usingNoTrigger, indexType){
 	docCount = docCount || 1000;
 	if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
@@ -129,8 +130,28 @@ function loadTests(docCount, cb, usingNoTrigger){
 
 	console.log('Generating ' + docCount + ' documents');
 
-	for (var i = 0; i < docCount; i++){
-		dataSet[i] = {k: faker.random.uuid(), v: newRandomUserDoc()};
+	if (indexType == 'collection' || indexType == 'string' || !indexType){
+		for (var i = 0; i < docCount; i++){
+			dataSet[i] = {k: faker.random.uuid(), v: newRandomUserDoc()};
+		}
+	} else if (indexType == 'number') {
+		for (var i = 0; i < docCount; i++){
+			dataSet[i] = {k: faker.random.number(), v: faker.random.uuid()};
+		}
+	} else if (indexType == 'date'){
+		for (var i = 0; i < docCount; i++){
+			dataSet[i] = {k: faker.date.past(), v: faker.random.uuid()};
+		}
+	} else if (indexType == 'boolean'){
+		for (var i = 0; i < docCount; i++){
+			dataSet[i] = {k: faker.random.boolean(), v: faker.random.uuid()};
+		}
+	} else if (indexType = 'buffer'){
+		for (var i = 0; i < docCount; i++){
+			dataSet[i] = {k: crypto.randomBytes(faker.random.number(100)), v: faker.random.uuid()};
+		}
+	} else {
+		throw new TypeError('unknown index type: ' + indexType);
 	}
 
 	function saveIndex(_next){
@@ -319,49 +340,65 @@ function loadTests(docCount, cb, usingNoTrigger){
 	});
 }
 
-console.log('----------------------');
-console.log('Basic index testing');
-console.log('----------------------');
+showSectionMessage('Basic index testing');
 basicTests(function(){
 	console.log('done');
-	console.log('');
-	console.log('----------------------');
-	console.log('Data load index testing');
-	console.log('----------------------');
+
+	showSectionMessage('Data load index testing');
 	var st1 = clock();
 	loadTests(undefined, function(){
 		var duration = clock(st1);
 		console.log('done in ' + duration.toString() + 'ms');
 
-		console.log('');
-		console.log('----------------------');
-		console.log('Data load index testing (noTrigger == true)');
-		console.log('----------------------');
+		showSectionMessage('Data load index testing (noTrigger == true)');
 		var st2 = clock();
 		loadTests(undefined, function(){
 			var duration = clock(st2);
 			console.log('done in ' + duration.toString() + 'ms');
 
-			console.log('');
-			console.log('----------------------');
-			console.log('Bigger load index testing');
-			console.log('----------------------');
-			var st3 = clock();
-			loadTests(100000, function(){
-				var duration = clock(st3);
+			showSectionMessage('Number index testing (noTrigger == true)');
+			var stNumber = clock();
+			loadTests(undefined, function(){
+				var duration = clock(stNumber);
 				console.log('done in ' + duration.toString() + 'ms');
 
-				if (!runMega) return;
-				console.log('');
-				console.log('----------------------');
-				console.log('Mega load index testing (500k docs)');
-				console.log('----------------------');
-				var st4 = clock();
-				loadTests(500000, function(){
-					var duration = clock(st4);
+				showSectionMessage('Date index testing (noTrigger == true)');
+				var stDate = clock();
+				loadTests(undefined, function(){
+					var duration = clock(stDate);
 					console.log('done in ' + duration.toString() + 'ms');
-				}, true);
-			}, true);
+
+					showSectionMessage('Boolean index testing (noTrigger == true)');
+					var stBoolean = clock();
+					loadTests(undefined, function(){
+						var duration = clock(stBoolean);
+						console.log('done in ' + duration.toString() + 'ms');
+
+						showSectionMessage('Bigger load index testing');
+						var st3 = clock();
+						loadTests(100000, function(){
+							var duration = clock(st3);
+							console.log('done in ' + duration.toString() + 'ms');
+
+							if (!runMega) return;
+							
+							showSectionMessage('Mega load index testing (500k docs)');
+							var st4 = clock();
+							loadTests(500000, function(){
+								var duration = clock(st4);
+								console.log('done in ' + duration.toString() + 'ms');
+							}, true);
+						}, true);
+					}, true, 'boolean');
+				}, true, 'date');
+			}, true, 'number');
 		}, true);
 	});
 });
+
+function showSectionMessage(m){
+	console.log('');
+	console.log('----------------------');
+	console.log(m);
+	console.log('----------------------');
+}
