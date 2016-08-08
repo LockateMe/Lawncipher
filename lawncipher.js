@@ -3861,7 +3861,7 @@
 		return bCopy;
 	}
 
-	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, loadCallback, _maxLoadedDataSize, _maxNodeSize, _booleanMode){
+	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, loadCallback, _maxLoadedDataSize, _maxNodeSize, _booleanMode, _uniqueIndex){
 		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('collectionName must be a non-empty string');
 		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('indexName must be a non-empty string');
 		if (!(collectionKey instanceof Uint8Array && collectionKey.length == 32)) throw new TypeError('collectionKey must be a 32-byte Uint8Array');
@@ -3875,8 +3875,9 @@
 		var collectionPath = rootPath ? pathJoin(rootPath, collectionName) : collectionName;
 
 		//If indexName == 'index' or '_index', meaning that this index is central collection
-		//Else, this index is an attribute search index. Hence, nodes have to allow multiple values for a given key
-		var attributeIndex = !(indexName == 'index');
+		//Else, this index is an attribute search index. Hence, nodes may have to allow multiple values for a given key
+		var isCollectionIndex = (indexName == 'index');
+		var disallowKeyCollisions = isCollectionIndex || _uniqueIndex;
 
 		var fragmentNameMatcher = indexNameRegexBuilder(indexName); //Fragment filename validation RegExp instance
 		var fragmentNameBuilder = indexNameBuilder(indexName); //Fragment filename builder function. Takes the dataRange (a PearsonRange instance) of the fragment in question
@@ -3927,7 +3928,7 @@
 		var fragmentsLRU = new LRUStringSet();
 
 		var theHasher = PearsonHasher(pearsonSeed);
-		var theTree = new PearsonBPlusTree(theHasher, _maxNodeSize || 53248, !attributeIndex); //Key collisions are disallowed on attribute/searchIndex
+		var theTree = new PearsonBPlusTree(theHasher, _maxNodeSize || 53248, disallowKeyCollisions); //Key collisions are disallowed on collection or "unique" searchIndex
 
 		var hashToLong = function(s, isLookup){
 			return bufferBEToLong(theHasher(s, isLookup), isLookup);
@@ -4092,11 +4093,12 @@
 
 			//We must check that the range that corresponds to the key is currently loaded
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
-			var keyHash = hashToLong(key);
+			var keyHash = theHasher(key);
+			var keyHashLong = bufferBEToLong(keyHash);
 
 			//Check that data range is loaded before performing the addition
-			if (!isRangeOfHashLoaded(keyHash)){
-				loadIndexFragmentForHash(keyHash, function(err){
+			if (!isRangeOfHashLoaded(keyHashLong)){
+				loadIndexFragmentForHash(keyHashLong, function(err){
 					if (err){
 						if (cb) cb(err);
 						else throw err;
@@ -4104,18 +4106,18 @@
 					}
 
 					if (!_booleanMode){
-						theTree.addWithHash(key, value, noTrigger, replace, keyHash);
+						theTree.add(key, value, noTrigger, replace, keyHash);
 					} else {
-						theTree.addWithHash(longToHex(keyHash), value, noTrigger, replace, keyHash); //Use keyHash as hash (for data distribution) and storage (as identifier)
+						theTree.add(to_hex(keyHash), value, noTrigger, replace, keyHash); //Use keyHash as hash (for data distribution) and storage (as identifier)
 					}
 
 					if (cb) cb();
 				});
 			} else {
 				if (!_booleanMode){
-					theTree.addWithHash(key, value, noTrigger, replace, keyHash);
+					theTree.add(key, value, noTrigger, replace, keyHash);
 				} else {
-					theTree.addWithHash(longToHex(keyHash), value, noTrigger, replace, keyHash);
+					theTree.add(to_hex(keyHash), value, noTrigger, replace, keyHash);
 				}
 
 				if (cb) cb();
@@ -4135,23 +4137,24 @@
 				return;
 			}
 
-			var keyHash = hashToLong(key, true); //Lookup mode: on
+			var keyHash = theHasher(key, true); //Lookup mode: on
+			var keyHashLong = !Array.isArray(keyHash) ? bufferBEToLong(keyHash) : undefined;
 
 			if (!_booleanMode){
 				//Check that the data range is loaded before performing the removal
-				if (!isRangeOfHashLoaded(keyHash)){
-					loadIndexFragmentForHash(keyHash, function(err){
+				if (!isRangeOfHashLoaded(keyHashLong)){
+					loadIndexFragmentForHash(keyHashLong, function(err){
 						if (err){
 							if (cb) cb(err);
 							else throw err;
 							return;
 						}
 
-						theTree.remove(key, value, noTrigger);
+						theTree.remove(key, value, noTrigger, keyHash);
 						if (cb) cb();
 					});
 				} else {
-					theTree.remove(key, value, noTrigger);
+					theTree.remove(key, value, noTrigger, keyHash);
 					if (cb) cb();
 				}
 			} else {
@@ -4674,6 +4677,25 @@
 	}
 
 	/**
+	* @private
+	* Check that the parameter is a "hashable type"
+	* @param {String|Number|Date|Boolean|Uint8Array} d - the data to be hashed
+	* @returns {Boolean}
+	*/
+	function checkHashable(d){
+		var td = typeof d;
+		if (!((d instanceof Uint8Array || td == 'string') && d.length > 0) && !(td == 'number' || td == 'boolean') && !(d instanceof Date)) throw new TypeError('key must be either a Uint8Array, a string, a date, a number or a boolean');
+
+		if (td == 'object'){
+			if (d instanceof Uint8Array) td = 'uint8array';
+			else if (d instanceof Date) td = 'date';
+			else throw new Error('checkHashable is broken!');
+		}
+
+		return td;
+	}
+
+	/**
 	* Get the adapted Pearson hashing function
 	*/
 	function PearsonHasher(seed, hashLength, numberGranularity, dateGranularity){
@@ -4697,7 +4719,10 @@
 
 		for (var i = 0; i < seed.length; i++){
 			var i16 = i.toString(16);
-			var currentRange = PearsonRange.fromString(i16 + '00000000000000_' + i16 + 'ffffffffffffff');
+			if (i16.length == 1) i16 = '0' + i16;
+			var rangeStr = i16 + '00000000000000_' + i16 + 'ffffffffffffff';
+
+			var currentRange = PearsonRange.fromString(rangeStr);
 			if (seed[i] % 2 == 1){
 				booleanTrueRanges[boolTrueCount] = currentRange;
 				boolTrueCount++;
@@ -5113,25 +5138,6 @@
 			for (var i = 0; i < currentEvHandlers.length; i++){
 				currentEvHandlers[i].apply(undefined, args);
 			}
-		}
-
-		/**
-		* @private
-		* Check that the parameter is a "hashable type"
-		* @param {String|Number|Date|Boolean|Uint8Array} d - the data to be hashed
-		* @returns {Boolean}
-		*/
-		function checkHashable(d){
-			var td = typeof d;
-			if (!((d instanceof Uint8Array || td == 'string') && d.length > 0) && !(td == 'number' || td == 'boolean') && !(d instanceof Date)) throw new TypeError('key must be either a Uint8Array, a string, a date, a number or a boolean');
-
-			if (td == 'object'){
-				if (d instanceof Uint8Array) td = 'uint8array';
-				else if (d instanceof Date) td = 'date';
-				else throw new Error('checkHashable is broken!');
-			}
-
-			return td;
 		}
 
 		/**
@@ -5698,7 +5704,13 @@
 	};
 
 	function bufferBEToLong(b, isArrayOfBuffers){
-		if (isArrayOfBuffers){
+		if (isArrayOfBuffers && Array.isArray(b) && b.length > 0){
+			/*
+			* Why that many conditions? Because isArrayOfBuffers == true when isLookup == true
+			* But isLookup == true when the tree/index is performing a lookup, regardless of index type
+			* So, it happens often that we don't receive an array even though isArrayOfBuffers == true
+			* Therefore, we also have to check that b is indeed an array when isArrayOfBuffers == true
+			*/
 			var r = [];
 			for (var i = 0; i < b.length; i++){
 				r.push(bufferBEToLong(b[i]));
