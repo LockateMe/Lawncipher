@@ -63,6 +63,11 @@ function newRandomUserDoc(){
 	};
 }
 
+function randomInt(){
+	var b = crypto.randomBytes(4);
+	return (b[0] << 24) + (b[1] << 16) + (b[2] << 8) + b[3]
+}
+
 function clock(s){
 	if (!s) return process.hrtime();
 	var d = process.hrtime(s);
@@ -117,8 +122,13 @@ function basicTests(next){
 	});
 }
 
+function returnAndLog(v){
+	console.log(v);
+	return v;
+}
+
 //A testing method, designed to test save, loading, lookup and removal of a non-negligeable data set
-function loadTests(docCount, cb, usingNoTrigger, indexType){
+function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 	docCount = docCount || 1000;
 	if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
@@ -134,9 +144,10 @@ function loadTests(docCount, cb, usingNoTrigger, indexType){
 		for (var i = 0; i < docCount; i++){
 			dataSet[i] = {k: faker.random.uuid(), v: newRandomUserDoc()};
 		}
+		//indexType = 'index';
 	} else if (indexType == 'number') {
 		for (var i = 0; i < docCount; i++){
-			dataSet[i] = {k: faker.random.number(), v: faker.random.uuid()};
+			dataSet[i] = {k: randomInt(), v: faker.random.uuid()};
 		}
 	} else if (indexType == 'date'){
 		for (var i = 0; i < docCount; i++){
@@ -205,7 +216,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType){
 
 					addOne();
 				}
-			});
+			}, undefined, undefined, indexType == 'boolean', unique);
 		});
 	}
 
@@ -245,7 +256,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType){
 			}
 
 			lookupOne();
-		});
+		}, undefined, undefined, indexType == 'boolean', unique);
 	}
 
 	function destroyIndex(_next){
@@ -381,7 +392,7 @@ basicTests(function(){
 							console.log('done in ' + duration.toString() + 'ms');
 
 							if (!runMega) return;
-							
+
 							showSectionMessage('Mega load index testing (500k docs)');
 							var st4 = clock();
 							loadTests(500000, function(){
