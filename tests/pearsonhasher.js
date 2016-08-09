@@ -42,6 +42,11 @@ assert(to_hex(ph(4)) != to_hex(ph(3.49)));
 
 //Dates
 var n = new Date();
+var nRounded = new Date(Math.round(n.getTime() / 1000) * 1000);
 var nPlusOne = new Date(n.getTime() + 1000);
+var nMinusOne = new Date(n.getTime() + 1000);
+
 assert(to_hex(ph(n)) == to_hex(ph(n)));
+assert(to_hex(ph(n)) == to_hex(ph(nRounded)));
 assert(to_hex(ph(n)) != to_hex(ph(nPlusOne)));
+assert(to_hex(ph(n)) != to_hex(ph(nMinusOne)));
