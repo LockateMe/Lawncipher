@@ -74,20 +74,36 @@ function clock(s){
 	return Math.round(d[0] * 1000 + d[1] / 1000000);
 }
 
-function basicTests(next){
+function basicTests(next, type){
 	var indexKey = randomBuffer(32);
+
+	var k1, k2;
+	var v1, v2;
 
 	function saveIndex(_next){
 		rmdirr(testIndexPath, function(err){
 			if (err) throw err;
 
+			if (!type || type == 'string'){
+				k1 = 'test', v1 = 1;
+				k2 = 'hello', v2 = 2;
+			} else if (type == 'number'){
+				k1 = 2, v1 = 'hello';
+				k2 = 1, v2 = 'test';
+			} else if (type == 'date'){
+				k1 = new Date();
+				k2 = new Date(k1.getTime() + 1000);
+				v1 = 'hello';
+				v2 = 'test';
+			} else throw new Error('unknown index type:' + type);
+
 			var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, function(loadErr){
 				if (loadErr) throw loadErr;
 
-				testIndex.add('test', 1, function(e){
+				testIndex.add(k1, v1, function(e){
 					if (e) throw e;
 
-					testIndex.add('hello', 2, function(e){
+					testIndex.add(k2, v2, function(e){
 						if (e) throw e;
 
 						_next();
@@ -101,16 +117,16 @@ function basicTests(next){
 		var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, function(loadErr){
 			if (loadErr) throw loadErr;
 
-			testIndex.lookup('test', function(err, value){
+			testIndex.lookup(k1, function(err, value){
 				if (err) throw err;
 
-				assert(value == 1);
+				assert(deepObjectEquality(v1, value));
 
-				testIndex.lookup('hello', function(err, value){
+				testIndex.lookup(k2, function(err, value){
 					if (err) throw err;
 
-					assert(value == 2);
-
+					assert(deepObjectEquality(v2, value));
+					
 					_next();
 				});
 			});
@@ -151,7 +167,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 		}
 	} else if (indexType == 'date'){
 		for (var i = 0; i < docCount; i++){
-			dataSet[i] = {k: faker.date.past(), v: faker.random.uuid()};
+			dataSet[i] = {k: new Date(faker.date.past()), v: faker.random.uuid()};
 		}
 	} else if (indexType == 'boolean'){
 		for (var i = 0; i < docCount; i++){
@@ -234,9 +250,9 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 				testIndex.lookup(currentTuple.k, function(err, value){
 					if (err) throw err;
 
-					//console.log('lookupIndex: ' + lookupIndex);
-					//console.log('Found value: ' + JSON.stringify(value));
-					//console.log('Expected value: ' + JSON.stringify(currentTuple.v));
+					console.log('Current key: ' + currentTuple.k);
+					console.log('Found value: ' + JSON.stringify(value));
+					console.log('Expected value: ' + JSON.stringify(currentTuple.v));
 					assert(deepObjectEquality(currentTuple.v, value));
 
 					nextLookup();
@@ -355,56 +371,68 @@ showSectionMessage('Basic index testing');
 basicTests(function(){
 	console.log('done');
 
-	showSectionMessage('Data load index testing');
-	var st1 = clock();
-	loadTests(undefined, function(){
-		var duration = clock(st1);
-		console.log('done in ' + duration.toString() + 'ms');
+	showSectionMessage('Basic indexing of numbers');
+	basicTests(function(){
+		console.log('done');
 
-		showSectionMessage('Data load index testing (noTrigger == true)');
-		var st2 = clock();
-		loadTests(undefined, function(){
-			var duration = clock(st2);
-			console.log('done in ' + duration.toString() + 'ms');
+		showSectionMessage('Basic indexing of dates');
+		basicTests(function(){
+			console.log('done');
 
-			showSectionMessage('Number index testing (noTrigger == true)');
-			var stNumber = clock();
+			//Basic testing of boolean indexing still to be done
+
+			showSectionMessage('Data load index testing');
+			var st1 = clock();
 			loadTests(undefined, function(){
-				var duration = clock(stNumber);
+				var duration = clock(st1);
 				console.log('done in ' + duration.toString() + 'ms');
 
-				showSectionMessage('Date index testing (noTrigger == true)');
-				var stDate = clock();
+				showSectionMessage('Data load index testing (noTrigger == true)');
+				var st2 = clock();
 				loadTests(undefined, function(){
-					var duration = clock(stDate);
+					var duration = clock(st2);
 					console.log('done in ' + duration.toString() + 'ms');
 
-					showSectionMessage('Boolean index testing (noTrigger == true)');
-					var stBoolean = clock();
+					showSectionMessage('Number index testing (noTrigger == true)');
+					var stNumber = clock();
 					loadTests(undefined, function(){
-						var duration = clock(stBoolean);
+						var duration = clock(stNumber);
 						console.log('done in ' + duration.toString() + 'ms');
 
-						showSectionMessage('Bigger load index testing');
-						var st3 = clock();
-						loadTests(100000, function(){
-							var duration = clock(st3);
+						showSectionMessage('Date index testing (noTrigger == true)');
+						var stDate = clock();
+						loadTests(undefined, function(){
+							var duration = clock(stDate);
 							console.log('done in ' + duration.toString() + 'ms');
 
-							if (!runMega) return;
-
-							showSectionMessage('Mega load index testing (500k docs)');
-							var st4 = clock();
-							loadTests(500000, function(){
-								var duration = clock(st4);
+							showSectionMessage('Boolean index testing (noTrigger == true)');
+							var stBoolean = clock();
+							loadTests(undefined, function(){
+								var duration = clock(stBoolean);
 								console.log('done in ' + duration.toString() + 'ms');
-							}, true);
-						}, true);
-					}, true, 'boolean');
-				}, true, 'date');
-			}, true, 'number');
-		}, true);
-	});
+
+								showSectionMessage('Bigger load index testing');
+								var st3 = clock();
+								loadTests(100000, function(){
+									var duration = clock(st3);
+									console.log('done in ' + duration.toString() + 'ms');
+
+									if (!runMega) return;
+
+									showSectionMessage('Mega load index testing (500k docs)');
+									var st4 = clock();
+									loadTests(500000, function(){
+										var duration = clock(st4);
+										console.log('done in ' + duration.toString() + 'ms');
+									}, true);
+								}, true);
+							}, true, 'boolean');
+						}, true, 'date');
+					}, true, 'number');
+				}, true);
+			});
+		}, 'date');
+	}, 'number');
 });
 
 function showSectionMessage(m){
