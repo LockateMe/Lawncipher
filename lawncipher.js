@@ -3928,7 +3928,7 @@
 		var fragmentsLRU = new LRUStringSet();
 
 		var theHasher = PearsonHasher(pearsonSeed);
-		var theTree = new PearsonBPlusTree(theHasher, _maxNodeSize || 53248, disallowKeyCollisions); //Key collisions are disallowed on collection or "unique" searchIndex
+		var theTree = new PearsonBPlusTree(theHasher, _maxNodeSize || 53248, disallowKeyCollisions, _booleanMode); //Key collisions are disallowed on collection or "unique" searchIndex
 
 		var hashToLong = function(s, isLookup){
 			return bufferBEToLong(theHasher(s, isLookup), isLookup);
@@ -4073,6 +4073,7 @@
 						}
 
 						//Data range usage doesn't "need" to be marked in this case, because loadIndexFragmentForHash does it, through loadIndexFragment
+						//console.log('keyHash:' + keyHash);
 						inTreeValue = theTree.lookup(key, keyHash);
 						cb(undefined, inTreeValue);
 					});
@@ -4807,7 +4808,14 @@
 			return seedVal % 2 == 1; //"True" are distributed with odd values, "false" are distributed with even values
 		};
 
+		var dateToNumberCasting = function(d){
+			if (!(d instanceof Date)) throw new TypeError('d must be a date instance');
+
+			return Math.round(d.getTime() / dateGranularity) * dateGranularity;
+		};
+
 		hasher.reverse = reverser;
+		hasher.dateToNumber = dateToNumberCasting;
 
 		return hasher;
 	}
@@ -4819,7 +4827,7 @@
 	* -central collection index. Key : docId. Value : document
 	* -search tree for an attribute in the index model. Key : attributeValue. Value : matching docIDs
 	*/
-	function PearsonBPlusTree(hasher, maxBinWidth, disallowKeyCollisions){
+	function PearsonBPlusTree(hasher, maxBinWidth, disallowKeyCollisions, _booleanMode){
 		//The function retruned from PearsonHasher()
 		if (typeof hasher != 'function') throw new TypeError('hasher must be a function');
 		//Maximum size of a bin. Ideally this number should represent the size of the data to be held by a single index fragment file
@@ -4942,7 +4950,8 @@
 		* @param {String|Object|Number} [value] - the data to be stored in the tree for the given key. If value is missing, it is assumed that key is a documentId and the corresponding document will be retrieved from the current collection
 		*/
 		self.add = function(key, value, noTrigger, replace, _withHash){
-			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
+			checkHashable(key);
+			//if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
 			var valType = typeof value;
 			if (!(valType == 'string' || valType == 'number' || valType == 'object')) throw new TypeError('value must either be a string, a number, or a JSON object');
@@ -4957,7 +4966,8 @@
 		};
 
 		self.remove = function(key, value, noTrigger, _withHash){
-			if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
+			checkHashable(key);
+			//if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
 			if (_withHash){
 				if (!(_withHash instanceof Uint8Array && _withHash.length == 8)) throw new TypeError('if _withHash is provided, it must be an 8 byte Uint8Array');
@@ -5111,9 +5121,11 @@
 		* @param {String|Uint8Array} [hash] - the Pearson hash of the given key
 		*/
 		self.lookup = function(key, hash){
-			if (!(typeof key == 'string' || typeof key == 'number')) throw new TypeError('key must be a string or number');
+			checkHashable(key);
+			//if (!(typeof key == 'string' || typeof key == 'number')) throw new TypeError('key must be a string or number');
 
 			if (!hash) hash = hashToLong(key);
+			if (key instanceof Date) key = hasher.dateToNumber(key);
 
 			return rootNode.lookup(key, hash);
 		};
@@ -5241,6 +5253,8 @@
 					hash = bufferBEToLong(hash);
 				}
 
+				if (key instanceof Date) key = hasher.dateToNumber(key);
+
 				if (isLeaf()){
 					var newDataSize = docSize(value, key);
 					var newNodeSize = currentDataSize + newDataSize;
@@ -5298,6 +5312,8 @@
 					hash = bufferBEToLong(hash);
 				}
 
+				if (key instanceof Date) key = hasher.dateToNumber(key);
+
 				if (isLeaf()){
 					if (!subCollection[key]) return;
 
@@ -5339,6 +5355,8 @@
 			* @param {Long} hash
 			*/
 			thisNode.lookup = function(key, hash){
+				if (key instanceof Date) key = hasher.dateToNumber(key);
+
 				if (this.isLeaf()){
 					return subCollection[key] && clone(subCollection[key]);
 				} else {
@@ -5509,7 +5527,10 @@
 				var subCollectionList = Object.keys(subCollection);
 				var leftSubCollection = {}, rightSubCollection = {};
 				for (var i = 0; i < subCollectionList.length; i++){
-					var currentHash = hashToLong(subCollectionList[i]);
+					var currentHash;
+					if (_booleanMode) currentHash = subCollectionList[i]; //In boolean mode, the hashes are used as keys...
+					else currentHash = hashToLong(subCollectionList[i]);
+
 					if (leftRange.contains(currentHash)){
 						leftSubCollection[subCollectionList[i]] = subCollection[subCollectionList[i]];
 					} else if (rightRange.contains(currentHash)){
