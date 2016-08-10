@@ -126,7 +126,7 @@ function basicTests(next, type){
 					if (err) throw err;
 
 					assert(deepObjectEquality(v2, value));
-					
+
 					_next();
 				});
 			});
@@ -250,10 +250,18 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 				testIndex.lookup(currentTuple.k, function(err, value){
 					if (err) throw err;
 
-					console.log('Current key: ' + currentTuple.k);
-					console.log('Found value: ' + JSON.stringify(value));
-					console.log('Expected value: ' + JSON.stringify(currentTuple.v));
-					assert(deepObjectEquality(currentTuple.v, value));
+					//console.log('Current key: ' + currentTuple.k);
+					//console.log('Found value: ' + JSON.stringify(value));
+					//console.log('Expected value: ' + JSON.stringify(currentTuple.v));
+					if (indexType == 'boolean'){
+						if (Array.isArray(value)){
+							console.log('array');
+							assert(value.indexOf(currentTuple.v) != -1);
+						} else {
+							console.log('non-array');
+							assert(deepObjectEquality(currentTuple.v, value));
+						}
+					} else assert(deepObjectEquality(currentTuple.v, value));
 
 					nextLookup();
 				});

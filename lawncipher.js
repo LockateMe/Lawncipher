@@ -3999,11 +3999,14 @@
 			if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
 			if (_booleanMode && typeof key != 'boolean'){
-				cb(new TypeError(''));
+				cb(new TypeError('if _booleanMode == true, then key must be a boolean'));
 				return;
 			}
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
-			var keyHash = hashToLong(key, true); //Lookup is on == true
+			var keyHash = theHasher(key, true);
+			var keyHashLong = !Array.isArray(keyHash) ? bufferBEToLong(keyHash) : undefined;
+			//var keyHash = hashToLong(key, true); //Lookup is on == true
+
 			if (_booleanMode){
 				//keyHash is an array of ranges
 				//Tree lookup method must be able to take key ranges
@@ -4015,28 +4018,30 @@
 				function processOne(isLoaded){
 					var currentSubRange = keyHash[keyHashIndex];
 					if (isLoaded || isRangeLoaded(currentSubRange)){
+						console.log('isLoaded(' + keyHashIndex + ')');
 						var inTreeUnfilteredSubset = theTree.lookupRange(currentSubRange).getBinnedRange().subCollection;
 
 						var inTreeSubset = [];
 
 						var subsetKeys = Object.keys(inTreeUnfilteredSubset);
 						for (var i = 0; i < subsetKeys.length; i++){
-							var reversed = theHasher.reverse(subsetKeys[i]);
+							var reversed = theHasher.reverseBoolean(subsetKeys[i]);
 							if (reversed === key) inTreeSubset.push(inTreeUnfilteredSubset[subsetKeys[i]]);
 						}
 
 						for (var i = 0; i < inTreeSubset.length; i++){
 							var currentVal = inTreeSubset[i];
-							if (typeof currentVal == 'string') inTreeSubset.push(currentVal);
+							if (typeof currentVal == 'string') matchedValues.push(currentVal);
 							else if (Array.isArray(currentVal)){
 								for (var j = 0; j < currentVal.length; j++){
-									inTreeSubset.push(currentVal[j]);
+									matchedValues.push(currentVal[j]);
 								}
 							}
 						}
 
 						next();
 					} else {
+						console.log('loadIndexFragment(' + keyHashIndex + ')');
 						loadIndexFragment(findRangeOfRange(currentSubRange), function(err){
 							if (err){
 								cb(err);
@@ -4055,8 +4060,10 @@
 					else processOne();
 				}
 
+				processOne();
+
 			} else {
-				var inTreeValue = theTree.lookup(key, keyHash);
+				var inTreeValue = theTree.lookup(key, keyHashLong);
 
 				/*
 					If inTreeValue is defined, then we have found what we are looking for
@@ -4065,8 +4072,8 @@
 					range is loaded in memory. In case it is not loaded in memory, load it
 					and lookup again.
 				*/
-				if (!inTreeValue && !isRangeOfHashLoaded(keyHash)){
-					loadIndexFragmentForHash(keyHash, function(err){
+				if (!inTreeValue && !isRangeOfHashLoaded(keyHashLong)){
+					loadIndexFragmentForHash(keyHashLong, function(err){
 						if (err){
 							cb(err);
 							return;
@@ -4074,11 +4081,11 @@
 
 						//Data range usage doesn't "need" to be marked in this case, because loadIndexFragmentForHash does it, through loadIndexFragment
 						//console.log('keyHash:' + keyHash);
-						inTreeValue = theTree.lookup(key, keyHash);
+						inTreeValue = theTree.lookup(key, keyHashLong);
 						cb(undefined, inTreeValue);
 					});
 				} else {
-					markUsageOfHash(keyHash);
+					markUsageOfHash(keyHashLong);
 					cb(undefined, inTreeValue);
 				}
 			}
@@ -4789,19 +4796,23 @@
 
 					return hash;
 				} else {
-					/* Get the ranges that contain the searched for boolean value
-					If b == true, lookup indices of odd seed values
-					If b == false, lookup indices of even seed values
+					/* Get the ranges that contain the searched values for a given boolean key
+					If d == true, lookup indices of odd seed values
+					If d == false, lookup indices of even seed values
 					*/
 
-					if (b == true) return booleanTrueRanges;
+					if (d == true) return booleanTrueRanges;
 					else return booleanFalseRanges;
 				}
 			}
 		};
 
-		var reverser = function (hash){
-			if (!(hash instanceof Uint8Array && hash.length == 8) && !(is_hex(hash) && hash.length == 16)) throw new TypeError('hash must be a Uint8Array of length 8 bytes');
+		var booleanReverser = function (hash){
+			if (is_hex(hash)){
+				if (hash.length != 16) throw new TypeError('when hash is a hex string, it must be 16 chars long');
+				hash = from_hex(has);
+			}
+			if (!(hash instanceof Uint8Array && hash.length == 8)) throw new TypeError('hash must be a Uint8Array of length 8 bytes');
 
 			var seedValIndex = hash[0];
 			var seedVal = seed[seedValIndex];
@@ -4814,7 +4825,7 @@
 			return Math.round(d.getTime() / dateGranularity) * dateGranularity;
 		};
 
-		hasher.reverse = reverser;
+		hasher.reverseBoolean = booleanReverser;
 		hasher.dateToNumber = dateToNumberCasting;
 
 		return hasher;
@@ -5091,7 +5102,7 @@
 						var keyList = Object.keys(currentNode._subCollection);
 						if (keyList.length == 0) return; //Nothing to test or remove
 						for (var i = 0; i < keyList.length; i++){
-							var currentKeyHash = hashToLong(keyList[i]);
+							var currentKeyHash = _booleanMode ? hexToLong(keyList[i]) : hashToLong(keyList[i]);
 							if (tRange.contains(currentKeyHash)){
 								delete currentNode._subCollection[keyList[i]];
 							}
@@ -5124,7 +5135,7 @@
 			checkHashable(key);
 			//if (!(typeof key == 'string' || typeof key == 'number')) throw new TypeError('key must be a string or number');
 
-			if (!hash) hash = hashToLong(key);
+			if (!hash) hash = hashToLong(key, true);
 			if (key instanceof Date) key = hasher.dateToNumber(key);
 
 			return rootNode.lookup(key, hash);
@@ -5528,7 +5539,7 @@
 				var leftSubCollection = {}, rightSubCollection = {};
 				for (var i = 0; i < subCollectionList.length; i++){
 					var currentHash;
-					if (_booleanMode) currentHash = subCollectionList[i]; //In boolean mode, the hashes are used as keys...
+					if (_booleanMode) currentHash = hexToLong(subCollectionList[i]); //In boolean mode, the hashes are used as keys...
 					else currentHash = hashToLong(subCollectionList[i]);
 
 					if (leftRange.contains(currentHash)){
