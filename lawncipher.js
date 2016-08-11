@@ -3928,7 +3928,7 @@
 		var fragmentsLRU = new LRUStringSet();
 
 		var theHasher = PearsonHasher(pearsonSeed);
-		var theTree = new PearsonBPlusTree(theHasher, _maxNodeSize || 53248, disallowKeyCollisions, _booleanMode); //Key collisions are disallowed on collection or "unique" searchIndex
+		var theTree = new PearsonBPlusTree(theHasher, _maxNodeSize || 53248, disallowKeyCollisions/*, _booleanMode*/); //Key collisions are disallowed on collection or "unique" searchIndex
 
 		var hashToLong = function(s, isLookup){
 			return bufferBEToLong(theHasher(s, isLookup), isLookup);
@@ -3998,16 +3998,17 @@
 		self.lookup = function(key, cb){
 			if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
-			if (_booleanMode && typeof key != 'boolean'){
+			/*if (_booleanMode && typeof key != 'boolean'){
 				cb(new TypeError('if _booleanMode == true, then key must be a boolean'));
 				return;
-			}
+			}*/
+
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
 			var keyHash = theHasher(key, true);
 			var keyHashLong = !Array.isArray(keyHash) ? bufferBEToLong(keyHash) : undefined;
 			//var keyHash = hashToLong(key, true); //Lookup is on == true
 
-			if (_booleanMode){
+			/*if (_booleanMode){
 				//keyHash is an array of ranges
 				//Tree lookup method must be able to take key ranges
 				//And we should load unloaded ranges
@@ -4018,7 +4019,7 @@
 				function processOne(isLoaded){
 					var currentSubRange = keyHash[keyHashIndex];
 					if (isLoaded || isRangeLoaded(currentSubRange)){
-						console.log('isLoaded(' + keyHashIndex + ')');
+						//console.log('isLoaded(' + keyHashIndex + ')');
 						var inTreeUnfilteredSubset = theTree.lookupRange(currentSubRange).getBinnedRange().subCollection;
 
 						var inTreeSubset = [];
@@ -4041,7 +4042,7 @@
 
 						next();
 					} else {
-						console.log('loadIndexFragment(' + keyHashIndex + ')');
+						//console.log('loadIndexFragment(' + keyHashIndex + ')');
 						loadIndexFragment(findRangeOfRange(currentSubRange), function(err){
 							if (err){
 								cb(err);
@@ -4057,47 +4058,50 @@
 				function next(){
 					keyHashIndex++;
 					if (keyHashIndex == keyHash.length) cb(undefined, matchedValues);
-					else processOne();
+					else {
+						if (keyHashIndex % 50 == 0) setTimeout(processOne, 0); //To stay away from an explosion of the callstack size, use set timeout once in every 50 boolean's ranges
+						else processOne();
+					}
 				}
 
 				processOne();
 
-			} else {
-				var inTreeValue = theTree.lookup(key, keyHashLong);
+			} else {*/
+			var inTreeValue = theTree.lookup(key, keyHashLong);
 
-				/*
-					If inTreeValue is defined, then we have found what we are looking for
+			/*
+				If inTreeValue is defined, then we have found what we are looking for
 
-					If it is not defined, then we have to check that the corresponding data
-					range is loaded in memory. In case it is not loaded in memory, load it
-					and lookup again.
-				*/
-				if (!inTreeValue && !isRangeOfHashLoaded(keyHashLong)){
-					loadIndexFragmentForHash(keyHashLong, function(err){
-						if (err){
-							cb(err);
-							return;
-						}
+				If it is not defined, then we have to check that the corresponding data
+				range is loaded in memory. In case it is not loaded in memory, load it
+				and lookup again.
+			*/
+			if (!inTreeValue && !isRangeOfHashLoaded(keyHashLong)){
+				loadIndexFragmentForHash(keyHashLong, function(err){
+					if (err){
+						cb(err);
+						return;
+					}
 
-						//Data range usage doesn't "need" to be marked in this case, because loadIndexFragmentForHash does it, through loadIndexFragment
-						//console.log('keyHash:' + keyHash);
-						inTreeValue = theTree.lookup(key, keyHashLong);
-						cb(undefined, inTreeValue);
-					});
-				} else {
-					markUsageOfHash(keyHashLong);
+					//Data range usage doesn't "need" to be marked in this case, because loadIndexFragmentForHash does it, through loadIndexFragment
+					//console.log('keyHash:' + keyHash);
+					inTreeValue = theTree.lookup(key, keyHashLong);
 					cb(undefined, inTreeValue);
-				}
+				});
+			} else {
+				markUsageOfHash(keyHashLong);
+				cb(undefined, inTreeValue);
 			}
+			//}
 		};
 
 		self.add = function(key, value, cb, noTrigger, replace){
 			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
 
-			if (_booleanMode && typeof key != 'boolean'){
+			/*if (_booleanMode && typeof key != 'boolean'){
 				cb(new TypeError('When _booleanMode == true, key must be a boolean'));
 				return;
-			}
+			}*/
 
 			//We must check that the range that corresponds to the key is currently loaded
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
@@ -4113,20 +4117,20 @@
 						return;
 					}
 
-					if (!_booleanMode){
-						theTree.add(key, value, noTrigger, replace, keyHash);
-					} else {
+					//if (!_booleanMode){
+					theTree.add(key, value, noTrigger, replace, keyHash);
+					/*} else {
 						theTree.add(to_hex(keyHash), value, noTrigger, replace, keyHash); //Use keyHash as hash (for data distribution) and storage (as identifier)
-					}
+					}*/
 
 					if (cb) cb();
 				});
 			} else {
-				if (!_booleanMode){
-					theTree.add(key, value, noTrigger, replace, keyHash);
-				} else {
+				//if (!_booleanMode){
+				theTree.add(key, value, noTrigger, replace, keyHash);
+				/*} else {
 					theTree.add(to_hex(keyHash), value, noTrigger, replace, keyHash);
-				}
+				}*/
 
 				if (cb) cb();
 			}
@@ -4138,17 +4142,17 @@
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
 
 			//But we have to explicitly check that typeof key == 'boolean' if _booleanMode == true
-			if (_booleanMode && typeof key != 'boolean'){
+			/*if (_booleanMode && typeof key != 'boolean'){
 				var e = new TypeError('When _booleanMode == true, key must be a boolean');
 				if (cb) cb(e);
 				else throw e;
 				return;
-			}
+			}*/
 
 			var keyHash = theHasher(key, true); //Lookup mode: on
 			var keyHashLong = !Array.isArray(keyHash) ? bufferBEToLong(keyHash) : undefined;
 
-			if (!_booleanMode){
+			//if (!_booleanMode){
 				//Check that the data range is loaded before performing the removal
 				if (!isRangeOfHashLoaded(keyHashLong)){
 					loadIndexFragmentForHash(keyHashLong, function(err){
@@ -4165,7 +4169,7 @@
 					theTree.remove(key, value, noTrigger, keyHash);
 					if (cb) cb();
 				}
-			} else {
+			/*} else {
 				//TODO: Use removeWithHash, in addition to the boolean special case where key = keyHash
 				//Or should we perform a lookup, that returns us the stored hashes, that we then remove?
 
@@ -4228,7 +4232,7 @@
 				}
 
 				nextNode();
-			}
+			}*/
 		};
 
 		self.nodeIterator = function(){
@@ -4476,7 +4480,7 @@
 				return;
 			}
 
-			console.log('Unloading ' + fRangeStr);
+			console.log('Unloading index fragment of range ' + fRangeStr);
 
 			var fRange = PearsonRange.fromString(fRangeStr);
 
@@ -4786,11 +4790,11 @@
 						if (rIndex == 0) r = randomBuffer(8);
 						currentSeedPosition = r[rIndex];
 						currentSeedVal = seed[currentSeedPosition];
-						distributed = !!(currentSeedVal % 2 == 1) == d;
+						distributed = (currentSeedVal % 2 == 1) == d;
 						rIndex = (rIndex + 1) % 8;
 					}
 					//Building the hash
-					hash[0] = currentSeedVal;
+					hash[0] = currentSeedPosition;
 					var hashEnd = randomBuffer(7);
 					for (var i = 0; i < 7; i++) hash[i+1] = hashEnd[i];
 
@@ -4810,7 +4814,7 @@
 		var booleanReverser = function (hash){
 			if (is_hex(hash)){
 				if (hash.length != 16) throw new TypeError('when hash is a hex string, it must be 16 chars long');
-				hash = from_hex(has);
+				hash = from_hex(hash);
 			}
 			if (!(hash instanceof Uint8Array && hash.length == 8)) throw new TypeError('hash must be a Uint8Array of length 8 bytes');
 
@@ -4838,7 +4842,7 @@
 	* -central collection index. Key : docId. Value : document
 	* -search tree for an attribute in the index model. Key : attributeValue. Value : matching docIDs
 	*/
-	function PearsonBPlusTree(hasher, maxBinWidth, disallowKeyCollisions, _booleanMode){
+	function PearsonBPlusTree(hasher, maxBinWidth, disallowKeyCollisions/*, _booleanMode*/){
 		//The function retruned from PearsonHasher()
 		if (typeof hasher != 'function') throw new TypeError('hasher must be a function');
 		//Maximum size of a bin. Ideally this number should represent the size of the data to be held by a single index fragment file
@@ -5102,7 +5106,7 @@
 						var keyList = Object.keys(currentNode._subCollection);
 						if (keyList.length == 0) return; //Nothing to test or remove
 						for (var i = 0; i < keyList.length; i++){
-							var currentKeyHash = _booleanMode ? hexToLong(keyList[i]) : hashToLong(keyList[i]);
+							var currentKeyHash = hashToLong(keyList[i]); //_booleanMode ? hexToLong(keyList[i]) : hashToLong(keyList[i]);
 							if (tRange.contains(currentKeyHash)){
 								delete currentNode._subCollection[keyList[i]];
 							}
@@ -5539,8 +5543,10 @@
 				var leftSubCollection = {}, rightSubCollection = {};
 				for (var i = 0; i < subCollectionList.length; i++){
 					var currentHash;
-					if (_booleanMode) currentHash = hexToLong(subCollectionList[i]); //In boolean mode, the hashes are used as keys...
-					else currentHash = hashToLong(subCollectionList[i]);
+					/*if (_booleanMode) currentHash = hexToLong(subCollectionList[i]); //In boolean mode, the hashes are used as keys...
+					else currentHash = hashToLong(subCollectionList[i]);*/
+
+					currentHash = hashToLong(subCollectionList[i]);
 
 					if (leftRange.contains(currentHash)){
 						leftSubCollection[subCollectionList[i]] = subCollection[subCollectionList[i]];

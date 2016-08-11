@@ -255,10 +255,8 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 					//console.log('Expected value: ' + JSON.stringify(currentTuple.v));
 					if (indexType == 'boolean'){
 						if (Array.isArray(value)){
-							console.log('array');
 							assert(value.indexOf(currentTuple.v) != -1);
 						} else {
-							console.log('non-array');
 							assert(deepObjectEquality(currentTuple.v, value));
 						}
 					} else assert(deepObjectEquality(currentTuple.v, value));
@@ -413,28 +411,28 @@ basicTests(function(){
 							var duration = clock(stDate);
 							console.log('done in ' + duration.toString() + 'ms');
 
-							showSectionMessage('Boolean index testing (noTrigger == true)');
+							/*showSectionMessage('Boolean index testing (noTrigger == true)');
 							var stBoolean = clock();
 							loadTests(undefined, function(){
 								var duration = clock(stBoolean);
 								console.log('done in ' + duration.toString() + 'ms');
+							}, true, 'boolean');*/
 
-								showSectionMessage('Bigger load index testing');
-								var st3 = clock();
-								loadTests(100000, function(){
-									var duration = clock(st3);
+							showSectionMessage('Bigger load index testing');
+							var st3 = clock();
+							loadTests(100000, function(){
+								var duration = clock(st3);
+								console.log('done in ' + duration.toString() + 'ms');
+
+								if (!runMega) return;
+
+								showSectionMessage('Mega load index testing (500k docs)');
+								var st4 = clock();
+								loadTests(500000, function(){
+									var duration = clock(st4);
 									console.log('done in ' + duration.toString() + 'ms');
-
-									if (!runMega) return;
-
-									showSectionMessage('Mega load index testing (500k docs)');
-									var st4 = clock();
-									loadTests(500000, function(){
-										var duration = clock(st4);
-										console.log('done in ' + duration.toString() + 'ms');
-									}, true);
 								}, true);
-							}, true, 'boolean');
+							}, true);
 						}, true, 'date');
 					}, true, 'number');
 				}, true);
