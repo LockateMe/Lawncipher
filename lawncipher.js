@@ -4707,7 +4707,7 @@
 	* B+ tree-like construction, to be used as index splitting and search index for Lawncipher (on id and index attributes)
 	* Example (and intended) uses:
 	* -central collection index. Key : docId. Value : document
-	* -search tree for an attribute in the index model. Key : attributeValue. Value : matching docIDs
+	* -search tree for an attribute in the index model. Key : attributeValue. Value : matching docIDs (Except for BooleanIndex, where <Key, Value> is <DocId, BooleanValue>)
 	*/
 	function PearsonBPlusTree(hasher, maxBinWidth, disallowKeyCollisions/*, _booleanMode*/){
 		//The function retruned from PearsonHasher()
@@ -5197,12 +5197,12 @@
 				if (key instanceof Date) key = hasher.dateToNumber(key);
 
 				if (isLeaf()){
-					if (!subCollection[key]) return;
+					if (typeof subCollection[key] == 'undefined' || subCollection[key] == null) return;
 
 					var dataSizeToRemove = (value && docSize(value, key)) || jsonSize(subCollection[key]);
 					currentDataSize -= dataSizeToRemove;
 					if (value && !disallowKeyCollisions){
-						if (subCollection[key]){
+						if (!(typeof subCollection[key] == 'undefined' || subCollection[key] == null)){
 							for (var i = 0; i < subCollection[key].length; i++){
 								if (subCollection[key][i] == value){
 									subCollection[key].splice(i, 1);

@@ -97,7 +97,7 @@ function basicTests(next, type){
 				v2 = 'test';
 			} else throw new Error('unknown index type:' + type);
 
-			var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, function(loadErr){
+			var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, type, function(loadErr){
 				if (loadErr) throw loadErr;
 
 				testIndex.add(k1, v1, function(e){
@@ -114,7 +114,7 @@ function basicTests(next, type){
 	}
 
 	function loadIndex(_next){
-		var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, function(loadErr){
+		var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, type, function(loadErr){
 			if (loadErr) throw loadErr;
 
 			testIndex.lookup(k1, function(err, value){
@@ -187,7 +187,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 
 			console.log('Starting index writes');
 			var saveStart = clock();
-			testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, function(loadErr){
+			testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, indexType, function(loadErr){
 				if (loadErr) throw loadErr;
 
 				console.log('Saving ' + docCount + ' documents' + (usingNoTrigger ? ' (while using noTrigger = true)' : ''));
@@ -232,53 +232,89 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 
 					addOne();
 				}
-			}, undefined, undefined, indexType == 'boolean', unique);
+			}, undefined, undefined, unique);
 		});
 	}
 
 	function loadIndex(_next){
 		var loadStart = clock();
-		testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, function(loadErr){
+		testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, indexType, function(loadErr){
 			if (loadErr) throw loadErr;
 
 			console.log('Loading and looking up ' + docCount + ' documents');
 
-			var lookupIndex = 0;
+			if (indexType != 'boolean'){
+				var lookupIndex = 0;
 
-			function lookupOne(){
-				var currentTuple = dataSet[lookupIndex];
-				testIndex.lookup(currentTuple.k, function(err, value){
+				function lookupOne(){
+					var currentTuple = dataSet[lookupIndex];
+					testIndex.lookup(currentTuple.k, function(err, value){
+						if (err) throw err;
+
+						//console.log('Current key: ' + currentTuple.k);
+						//console.log('Found value: ' + JSON.stringify(value));
+						//console.log('Expected value: ' + JSON.stringify(currentTuple.v));
+						if (indexType == 'boolean'){
+							if (Array.isArray(value)){
+								assert(value.indexOf(currentTuple.v) != -1);
+							} else {
+								assert(deepObjectEquality(currentTuple.v, value));
+							}
+						} else assert(deepObjectEquality(currentTuple.v, value));
+
+						nextLookup();
+					});
+				}
+
+				function nextLookup(){
+					lookupIndex++;
+					if (lookupIndex == docCount){
+						var loadDuration = clock(loadStart);
+						console.log('Loading and looking up ' + docCount + ' documents took ' + loadDuration + 'ms');
+						_next();
+					} else {
+						if (lookupIndex % 100 == 0) setTimeout(lookupOne, 0);
+						else lookupOne();
+					}
+				}
+
+				lookupOne();
+			} else {
+				var truePairs = {}, falsePairs = {};
+				dataSet.map(function(currentVector){
+					if (currentVector.k === true) truePairs[currentVector.v] = true;
+					else if (currentVector.k === false) falsePairs[currentVector.v] = false;
+					else throw new TypeError('Unexpected key type: ' + currentVector.k);
+				});
+
+				var truePairsList = Object.keys(truePairs),
+					falsePairsList = Object.keys(falsePairs);
+
+				testIndex.lookup(true, function(err, values){
 					if (err) throw err;
 
-					//console.log('Current key: ' + currentTuple.k);
-					//console.log('Found value: ' + JSON.stringify(value));
-					//console.log('Expected value: ' + JSON.stringify(currentTuple.v));
-					if (indexType == 'boolean'){
-						if (Array.isArray(value)){
-							assert(value.indexOf(currentTuple.v) != -1);
-						} else {
-							assert(deepObjectEquality(currentTuple.v, value));
-						}
-					} else assert(deepObjectEquality(currentTuple.v, value));
+					assert(truePairsList.length === values.length);
 
-					nextLookup();
+					for (var i = 0; i < values.length; i++){
+						assert(truePairs[values[i]] === true);
+					}
+
+					testIndex.lookup(false, function(err, values){
+						if (err) throw err;
+
+						assert(falsePairsList.length === values.length);
+
+						for (var i = 0; i < values.length; i++){
+							assert(falsePairs[values[i]] === false);
+						}
+
+						var loadDuration = clock(loadStart);
+						console.log('Loading and looking up ' + docCount + ' documents took ' + loadDuration + 'ms');
+						_next();
+					});
 				});
 			}
-
-			function nextLookup(){
-				lookupIndex++;
-				if (lookupIndex == docCount){
-					var loadDuration = clock(loadStart);
-					console.log('Loading and looking up ' + docCount + ' documents took ' + loadDuration + 'ms');
-					_next();
-				} else {
-					if (lookupIndex % 100 == 0) setTimeout(lookupOne, 0);
-					else lookupOne();
-				}
-			}
-
-			lookupOne();
-		}, undefined, undefined, indexType == 'boolean', unique);
+		}, undefined, undefined, unique);
 	}
 
 	function destroyIndex(_next){
@@ -290,10 +326,10 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 
 		if (usingNoTrigger){
 			for (var i = 0; i < docCount - 1; i++){
-				testIndex.remove(dataSet[i].k, undefined, undefined, true);
+				testIndex.remove(dataSet[i].k, indexType == 'boolean' ? dataSet[i].v : undefined, undefined, true);
 			}
 
-			testIndex.remove(dataSet[docCount - 1].k, undefined, function(err){
+			testIndex.remove(dataSet[docCount - 1].k, indexType == 'boolean' ? dataSet[docCount - 1].v : undefined, function(err){
 				if (err) throw err;
 
 				var destroyDuration = clock(destroyStart);
@@ -306,7 +342,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 
 			function removeOne(){
 				var currentTuple = dataSet[removeIndex];
-				testIndex.remove(currentTuple.k, undefined, function(err){
+				testIndex.remove(currentTuple.k, indexType == 'boolean' ? currentTuple.v : undefined, function(err){
 					if (err) throw err;
 
 					nextRemoval();
@@ -336,32 +372,62 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 
 		var lookupStart = clock();
 
-		var lookupIndex = 0;
+		if (indexType != 'boolean'){
+			var lookupIndex = 0;
 
-		function lookupOne(){
-			var currentTuple = dataSet[lookupIndex];
-			testIndex.lookup(currentTuple.k, function(err, value){
+			function lookupOne(){
+				var currentTuple = dataSet[lookupIndex];
+				testIndex.lookup(currentTuple.k, function(err, value){
+					if (err) throw err;
+
+					if (indexType == 'boolean') console.log('val: ' + JSON.stringify(value));
+
+					assert(!(value || (Array.isArray(value) && value.length > 0)));
+
+					nextLookup();
+				});
+			}
+
+			function nextLookup(){
+				lookupIndex++;
+				if (lookupIndex == docCount){
+					var lookupDuration = clock(lookupStart);
+					console.log('Looking up ' + docCount + ' non-existing docs took ' + lookupDuration + 'ms');
+					_next();
+				} else {
+					if (lookupIndex % 100 == 0) setTimeout(lookupOne, 0);
+					else lookupOne();
+				}
+			}
+
+			lookupOne();
+		} else {
+			var truePairs = {}, falsePairs = {};
+			dataSet.map(function(currentVector){
+				if (currentVector.k === true) truePairs[currentVector.v] = true;
+				else if (currentVector.k === false) falsePairs[currentVector.v] = false;
+				else throw new TypeError('Unexpected key type: ' + currentVector.k);
+			});
+
+			var truePairsList = Object.keys(truePairs),
+				falsePairsList = Object.keys(falsePairs);
+
+			testIndex.lookup(true, function(err, values){
 				if (err) throw err;
 
-				assert(!value);
+				assert(values.length == 0);
 
-				nextLookup();
+				testIndex.lookup(false, function(err, values){
+					if (err) throw err;
+
+					assert(values.length === 0);
+
+					var lookupDuration = clock(lookupStart);
+					console.log('Looking up ' + docCount + ' non-existing docs took ' + lookupDuration + 'ms');
+					_next();
+				});
 			});
 		}
-
-		function nextLookup(){
-			lookupIndex++;
-			if (lookupIndex == docCount){
-				var lookupDuration = clock(lookupStart);
-				console.log('Looking up ' + docCount + ' non-existing docs took ' + lookupDuration + 'ms');
-				_next();
-			} else {
-				if (lookupIndex % 100 == 0) setTimeout(lookupOne, 0);
-				else lookupOne();
-			}
-		}
-
-		lookupOne();
 	}
 
 	saveIndex(function(){
@@ -411,28 +477,28 @@ basicTests(function(){
 							var duration = clock(stDate);
 							console.log('done in ' + duration.toString() + 'ms');
 
-							/*showSectionMessage('Boolean index testing (noTrigger == true)');
+							showSectionMessage('Boolean index testing (noTrigger == true)');
 							var stBoolean = clock();
 							loadTests(undefined, function(){
 								var duration = clock(stBoolean);
 								console.log('done in ' + duration.toString() + 'ms');
-							}, true, 'boolean');*/
 
-							showSectionMessage('Bigger load index testing');
-							var st3 = clock();
-							loadTests(100000, function(){
-								var duration = clock(st3);
-								console.log('done in ' + duration.toString() + 'ms');
-
-								if (!runMega) return;
-
-								showSectionMessage('Mega load index testing (500k docs)');
-								var st4 = clock();
-								loadTests(500000, function(){
-									var duration = clock(st4);
+								showSectionMessage('Bigger load index testing');
+								var st3 = clock();
+								loadTests(100000, function(){
+									var duration = clock(st3);
 									console.log('done in ' + duration.toString() + 'ms');
+
+									if (!runMega) return;
+
+									showSectionMessage('Mega load index testing (500k docs)');
+									var st4 = clock();
+									loadTests(500000, function(){
+										var duration = clock(st4);
+										console.log('done in ' + duration.toString() + 'ms');
+									}, true);
 								}, true);
-							}, true);
+							}, true, 'boolean');
 						}, true, 'date');
 					}, true, 'number');
 				}, true);
