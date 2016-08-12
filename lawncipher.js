@@ -3892,6 +3892,9 @@
 				self.add = boolIndex.add;
 				self.remove = boolIndex.remove;
 				self.lookup = boolIndex.lookup;
+				self.iterator = boolIndex.iterator;
+				self.nodeIterator = boolIndex.nodeIterator;
+				self.map = boolIndex.map;
 
 				loadCallback();
 			}, _maxLoadedDataSize, _maxNodeSize);
@@ -4025,76 +4028,10 @@
 		self.lookup = function(key, cb){
 			if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
-			/*if (_booleanMode && typeof key != 'boolean'){
-				cb(new TypeError('if _booleanMode == true, then key must be a boolean'));
-				return;
-			}*/
-
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
-			var keyHash = theHasher(key, true);
-			var keyHashLong = !Array.isArray(keyHash) ? bufferBEToLong(keyHash) : undefined;
-			//var keyHash = hashToLong(key, true); //Lookup is on == true
+			var keyHash = hashToLong(key);
 
-			/*if (_booleanMode){
-				//keyHash is an array of ranges
-				//Tree lookup method must be able to take key ranges
-				//And we should load unloaded ranges
-				var keyHashIndex = 0;
-
-				var matchedValues = [];
-
-				function processOne(isLoaded){
-					var currentSubRange = keyHash[keyHashIndex];
-					if (isLoaded || isRangeLoaded(currentSubRange)){
-						//console.log('isLoaded(' + keyHashIndex + ')');
-						var inTreeUnfilteredSubset = theTree.lookupRange(currentSubRange).getBinnedRange().subCollection;
-
-						var inTreeSubset = [];
-
-						var subsetKeys = Object.keys(inTreeUnfilteredSubset);
-						for (var i = 0; i < subsetKeys.length; i++){
-							var reversed = theHasher.reverseBoolean(subsetKeys[i]);
-							if (reversed === key) inTreeSubset.push(inTreeUnfilteredSubset[subsetKeys[i]]);
-						}
-
-						for (var i = 0; i < inTreeSubset.length; i++){
-							var currentVal = inTreeSubset[i];
-							if (typeof currentVal == 'string') matchedValues.push(currentVal);
-							else if (Array.isArray(currentVal)){
-								for (var j = 0; j < currentVal.length; j++){
-									matchedValues.push(currentVal[j]);
-								}
-							}
-						}
-
-						next();
-					} else {
-						//console.log('loadIndexFragment(' + keyHashIndex + ')');
-						loadIndexFragment(findRangeOfRange(currentSubRange), function(err){
-							if (err){
-								cb(err);
-								return;
-							}
-
-							//Re-process the same subrange, now that it has been loaded
-							processOne(true);
-						});
-					}
-				}
-
-				function next(){
-					keyHashIndex++;
-					if (keyHashIndex == keyHash.length) cb(undefined, matchedValues);
-					else {
-						if (keyHashIndex % 50 == 0) setTimeout(processOne, 0); //To stay away from an explosion of the callstack size, use set timeout once in every 50 boolean's ranges
-						else processOne();
-					}
-				}
-
-				processOne();
-
-			} else {*/
-			var inTreeValue = theTree.lookup(key, keyHashLong);
+			var inTreeValue = theTree.lookup(key, keyHash);
 
 			/*
 				If inTreeValue is defined, then we have found what we are looking for
@@ -4103,32 +4040,25 @@
 				range is loaded in memory. In case it is not loaded in memory, load it
 				and lookup again.
 			*/
-			if (!inTreeValue && !isRangeOfHashLoaded(keyHashLong)){
-				loadIndexFragmentForHash(keyHashLong, function(err){
+			if (!inTreeValue && !isRangeOfHashLoaded(keyHash)){
+				loadIndexFragmentForHash(keyHash, function(err){
 					if (err){
 						cb(err);
 						return;
 					}
 
 					//Data range usage doesn't "need" to be marked in this case, because loadIndexFragmentForHash does it, through loadIndexFragment
-					//console.log('keyHash:' + keyHash);
-					inTreeValue = theTree.lookup(key, keyHashLong);
+					inTreeValue = theTree.lookup(key, keyHash);
 					cb(undefined, inTreeValue);
 				});
 			} else {
-				markUsageOfHash(keyHashLong);
+				markUsageOfHash(keyHash);
 				cb(undefined, inTreeValue);
 			}
-			//}
 		};
 
 		self.add = function(key, value, cb, noTrigger, replace){
 			if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
-
-			/*if (_booleanMode && typeof key != 'boolean'){
-				cb(new TypeError('When _booleanMode == true, key must be a boolean'));
-				return;
-			}*/
 
 			//We must check that the range that corresponds to the key is currently loaded
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
@@ -4144,20 +4074,12 @@
 						return;
 					}
 
-					//if (!_booleanMode){
 					theTree.add(key, value, noTrigger, replace, keyHash);
-					/*} else {
-						theTree.add(to_hex(keyHash), value, noTrigger, replace, keyHash); //Use keyHash as hash (for data distribution) and storage (as identifier)
-					}*/
 
 					if (cb) cb();
 				});
 			} else {
-				//if (!_booleanMode){
 				theTree.add(key, value, noTrigger, replace, keyHash);
-				/*} else {
-					theTree.add(to_hex(keyHash), value, noTrigger, replace, keyHash);
-				}*/
 
 				if (cb) cb();
 			}
@@ -4168,98 +4090,24 @@
 			//We must check that the range that corresponds to the key is currently loaded
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
 
-			//But we have to explicitly check that typeof key == 'boolean' if _booleanMode == true
-			/*if (_booleanMode && typeof key != 'boolean'){
-				var e = new TypeError('When _booleanMode == true, key must be a boolean');
-				if (cb) cb(e);
-				else throw e;
-				return;
-			}*/
-
 			var keyHash = theHasher(key, true); //Lookup mode: on
 			var keyHashLong = !Array.isArray(keyHash) ? bufferBEToLong(keyHash) : undefined;
 
-			//if (!_booleanMode){
-				//Check that the data range is loaded before performing the removal
-				if (!isRangeOfHashLoaded(keyHashLong)){
-					loadIndexFragmentForHash(keyHashLong, function(err){
-						if (err){
-							if (cb) cb(err);
-							else throw err;
-							return;
-						}
+			if (!isRangeOfHashLoaded(keyHashLong)){
+				loadIndexFragmentForHash(keyHashLong, function(err){
+					if (err){
+						if (cb) cb(err);
+						else throw err;
+						return;
+					}
 
-						theTree.remove(key, value, noTrigger, keyHash);
-						if (cb) cb();
-					});
-				} else {
 					theTree.remove(key, value, noTrigger, keyHash);
 					if (cb) cb();
-				}
-			/*} else {
-				//TODO: Use removeWithHash, in addition to the boolean special case where key = keyHash
-				//Or should we perform a lookup, that returns us the stored hashes, that we then remove?
-
-				//Iterate on each node of the tree
-				var hashRanges = keyHash;
-				var treeTraveler = self.nodeIterator();
-				var currentNode;
-
-				function processOne(){
-					var currentDataSubset = currentNode.getBinnedRange('none');
-
-					//For each node, build the list of subranges of the data to be deleted
-					//These subranges to be deleted are removed from hashRanges, since you won't need them afterwards
-					var currentRangesToDelete = [];
-					for (var i = 0; i < hashRanges.length; i++){
-						if (hashRanges[i].isContainedIn(currentDataSubset.range)){
-							currentRangesToDelete.push(hashRanges[i]);
-							hashRanges.splice(i, 1);
-							i--;
-						}
-					}
-
-					//For each of the node's key-value pair, if it is part of any of the "subranges to be deleted", delete it from the tree
-					var currentHashesToDelete = [];
-					var subCollectionKeys = Object.keys(currentDataSubset.subCollection);
-					for (var i = 0; i < subCollectionKeys.length; i++){
-						var currentHashLong = hexToLong(subCollectionKeys[i]);
-
-						for (var j = 0; j < currentRangesToDelete.length; j++){
-							if (currentRangesToDelete[j].contains(currentHashLong)){
-								currentRangesToDelete.push(currentHashLong);
-								break; //We found the right range. Get out of the range iteration loop
-							}
-						}
-					}
-
-					for (var i = 0; i < currentHashesToDelete.length; i++){
-						//Remove the matched key-value pairs, by passing their hash upfront and triggering the tree event only if we are removing the last element of currentHashesToDelete
-						theTree.remove(key, undefined, currentHashesToDelete.length - 1, currentHashesToDelete[i]);
-					}
-
-					nextNode();
-				}
-
-				function nextNode(){
-					if (treeTraveler.hasNext()){
-						treeTraveler.next(function(err, _n){
-							if (err){
-								if (cb) cb(err);
-								else throw err;
-								return;
-							}
-
-							currentNode = _n;
-							processOne();
-						});
-					} else {
-						if (cb) cb();
-					}
-				}
-
-				nextNode();
-			}*/
+				});
+			} else {
+				theTree.remove(key, value, noTrigger, keyHash);
+				if (cb) cb();
+			}
 		};
 
 		self.nodeIterator = function(){
@@ -4709,26 +4557,29 @@
 		};
 
 		self.add = function(boolVal, docId, cb, noTrigger, replace){
+			if (typeof boolVal != 'boolean') throw new TypeError('boolVal must be a boolean');
+			if (!docId) throw new TypeError('value cannot be null/undefined');
 			boolIndex.add(docId, boolVal, cb, noTrigger, replace);
 		};
 
 		self.remove = function(boolVal, docId, cb, noTrigger){
-			if (!docId) throw new TypeError('In a boolean index, value cannot be null/undefined');
+			if (typeof boolVal != 'boolean') throw new TypeError('boolVal must be a boolean');
+			if (!docId) throw new TypeError('In a boolean index, value cannot be null/undefined when deleting an element');
 
-			boolIndex.remove(docId, boolVal, cb, noTrigger);
+			boolIndex.remove(docId, undefined, cb, noTrigger);
 		};
 
-		/*self.nodeIterator = function(){
-
+		self.nodeIterator = function(){
+			throw new Error('Unsupported in BooleanIndex');
 		};
 
 		self.iterator = function(){
-
+			throw new Error('Unsupported in BooleanIndex');
 		};
 
 		self.map = function(mapFn, cb, limit, forQuery){
-
-		};*/
+			throw new Error('Unsupported in BooleanIndex');
+		};
 
 		self.indexType = function(){
 			return 'boolean';
@@ -4810,102 +4661,34 @@
 			if (!(typeof dateGranularity == 'number' && Math.floor(dateGranularity) == dateGranularity && dateGranularity > 0)) throw new TypeError('when defined, dateGranularity must be a strictly positive integer number')
 		} else dateGranularity = 1000; //By default, round to the nearest 1000ms (= to the nearest second)
 
-		var booleanTrueRanges = new Array(128);
-		var booleanFalseRanges = new Array(128);
-		var boolTrueCount = 0, boolFalseCount = 0;
-
-		for (var i = 0; i < seed.length; i++){
-			var i16 = i.toString(16);
-			if (i16.length == 1) i16 = '0' + i16;
-			var rangeStr = i16 + '00000000000000_' + i16 + 'ffffffffffffff';
-
-			var currentRange = PearsonRange.fromString(rangeStr);
-			if (seed[i] % 2 == 1){
-				booleanTrueRanges[boolTrueCount] = currentRange;
-				boolTrueCount++;
-			} else {
-				booleanFalseRanges[boolFalseCount] = currentRange;
-				boolFalseCount++;
-			}
-		}
-
-		if (!(boolTrueCount == 128 && boolFalseCount == 128)) console.error('Internal fatal error: checkSeedIntegrity() didn\'t detect the same amount of odd and even values');
-
 		var hasher = function(d, isLookup){
 			var td = checkHashable(d);
 
-			if (td != 'boolean'){ //Non-boolean hashing : Pearson function using type casting
-				//Type conversions. Beware : the order here matters a lot...
-				//Converts all the supported types to a Uint8Array
-				if (td == 'date'){
-					//Converts date to a number (then to a string), rounds the requested granularity (to the nearest second by default)
-					d = (Math.round(d.getTime() / dateGranularity) * dateGranularity).toString();
-				} else if (td == 'number'){
-					//Converts rounding the number with the requested granularity and converting it to a string
-					if (numberGranularity == 1) d = Math.round(d).toString(); //Dodging the "divide-multiply by 1" operations if numberGranularity == 1
-					else d = (Math.round(d / numberGranularity) * numberGranularity).toString();
-				}
-
-				//Converting the string to a Uint8Array
-				if (td == 'string') d = from_string(d);
-
-				//Pearson hashing loop
-				var hash = new Uint8Array(hashLength);
-				var i = 0, j = 0;
-				for (var j = 0; j < hashLength; j++){
-					var hashByte = seed[(d[0] + j) % 256];
-					for (var i = 1; i < d.length; i++){
-						hashByte = seed[(hashByte ^ d[i])];
-					}
-					hash[j] = hashByte;
-				}
-				return hash;
-			} else {
-				if (!isLookup){
-					/* Hash a boolean value
-					The start of the 8-byte hash of a boolean value is
-					the index of an odd seed value if d == true, and
-					the index of an even seed value if d == false
-					*/
-					var hash = new Uint8Array(8);
-					var distributed = false;
-					var rIndex = 0;
-					var r, currentSeedPosition, currentSeedVal;
-					while (!distributed){
-						if (rIndex == 0) r = randomBuffer(8);
-						currentSeedPosition = r[rIndex];
-						currentSeedVal = seed[currentSeedPosition];
-						distributed = (currentSeedVal % 2 == 1) == d;
-						rIndex = (rIndex + 1) % 8;
-					}
-					//Building the hash
-					hash[0] = currentSeedPosition;
-					var hashEnd = randomBuffer(7);
-					for (var i = 0; i < 7; i++) hash[i+1] = hashEnd[i];
-
-					return hash;
-				} else {
-					/* Get the ranges that contain the searched values for a given boolean key
-					If d == true, lookup indices of odd seed values
-					If d == false, lookup indices of even seed values
-					*/
-
-					if (d == true) return booleanTrueRanges;
-					else return booleanFalseRanges;
-				}
+			//Type conversions. Beware : the order here matters a lot...
+			//Converts all the supported types to a Uint8Array
+			if (td == 'date'){
+				//Converts date to a number (then to a string), rounds the requested granularity (to the nearest second by default)
+				d = (Math.round(d.getTime() / dateGranularity) * dateGranularity).toString();
+			} else if (td == 'number'){
+				//Converts rounding the number with the requested granularity and converting it to a string
+				if (numberGranularity == 1) d = Math.round(d).toString(); //Dodging the "divide-multiply by 1" operations if numberGranularity == 1
+				else d = (Math.round(d / numberGranularity) * numberGranularity).toString();
 			}
-		};
 
-		var booleanReverser = function (hash){
-			if (is_hex(hash)){
-				if (hash.length != 16) throw new TypeError('when hash is a hex string, it must be 16 chars long');
-				hash = from_hex(hash);
+			//Converting the string to a Uint8Array
+			if (td == 'string') d = from_string(d);
+
+			//Pearson hashing loop
+			var hash = new Uint8Array(hashLength);
+			var i = 0, j = 0;
+			for (var j = 0; j < hashLength; j++){
+				var hashByte = seed[(d[0] + j) % 256];
+				for (var i = 1; i < d.length; i++){
+					hashByte = seed[(hashByte ^ d[i])];
+				}
+				hash[j] = hashByte;
 			}
-			if (!(hash instanceof Uint8Array && hash.length == 8)) throw new TypeError('hash must be a Uint8Array of length 8 bytes');
-
-			var seedValIndex = hash[0];
-			var seedVal = seed[seedValIndex];
-			return seedVal % 2 == 1; //"True" are distributed with odd values, "false" are distributed with even values
+			return hash;
 		};
 
 		var dateToNumberCasting = function(d){
@@ -4914,7 +4697,6 @@
 			return Math.round(d.getTime() / dateGranularity) * dateGranularity;
 		};
 
-		hasher.reverseBoolean = booleanReverser;
 		hasher.dateToNumber = dateToNumberCasting;
 
 		return hasher;
@@ -5191,7 +4973,7 @@
 						var keyList = Object.keys(currentNode._subCollection);
 						if (keyList.length == 0) return; //Nothing to test or remove
 						for (var i = 0; i < keyList.length; i++){
-							var currentKeyHash = hashToLong(keyList[i]); //_booleanMode ? hexToLong(keyList[i]) : hashToLong(keyList[i]);
+							var currentKeyHash = hashToLong(keyList[i]);
 							if (tRange.contains(currentKeyHash)){
 								delete currentNode._subCollection[keyList[i]];
 							}
