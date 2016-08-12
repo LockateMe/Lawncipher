@@ -1092,7 +1092,7 @@
 								collectionIndexModel = collectionMeta.indexModel;
 								indexesSeeds = collectionMeta.indexesSeeds;
 
-								collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, function(loadIndexErr){
+								collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, 'collection', function(loadIndexErr){
 									if (loadIndexErr){
 										console.error('Load error - cannot init the collection index: ' + err);
 										cb(err);
@@ -1131,7 +1131,7 @@
 										return;
 									}
 
-									collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, function(loadIndexErr){
+									collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, 'collection', function(loadIndexErr){
 										if (err){
 											console.error('Load error - cannot inint the collection index: ' + err);
 											cb(err);
@@ -1246,7 +1246,7 @@
 						var collectionIndexSeed = PearsonSeedGenerator();
 						indexesSeeds._index = collectionIndexSeed;
 
-						collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, function(loadIndexErr){
+						collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, 'collection', function(loadIndexErr){
 							if (loadIndexErr){
 								console.error('Migration error - cannot init the Index instance: ' + err);
 								cb(err);
@@ -1359,7 +1359,8 @@
 
 
 				function initIndex(){
-					var i = new Index(rootPath, collectionName, '_' + fieldName, k, indexesSeeds[fieldName], function(loadSearchIndex){
+					var currentIndexType = collectionIndexModel[fieldName].type || 'string'; //Initialize the index with the field's type. Default to string, if weirdly the indexed field has no type
+					var i = new Index(rootPath, collectionName, '_' + fieldName, k, indexesSeeds[fieldName], currentIndexType, function(loadSearchIndex){
 						if (loadIndexErr){
 							cb(loadIndexErr);
 							return;
@@ -3854,6 +3855,12 @@
 		return typeof o == 'string' && (typeof o.index == 'object'|| typeof o.blobType == 'string');
 	}
 
+	var allowedIndexTypes = ['collection', 'string', 'number', 'date', 'buffer', 'boolean'];
+	function checkIndexKeyType(t){
+		if (typeof t != 'string') throw new TypeError('The indexType parameter must be a string');
+		if (allowedIndexTypes.indexOf(t) == -1) throw new Error('Index type must be one of the following: ' + JSON.stringify(allowedIndexTypes));
+	}
+
 	function copyBuffer(b){
 		checkBuffer(b, 'b');
 		var bCopy = new Uint8Array(b.length);
@@ -3861,16 +3868,36 @@
 		return bCopy;
 	}
 
-	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, loadCallback, _maxLoadedDataSize, _maxNodeSize, _booleanMode, _uniqueIndex){
+	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, indexKeyType, loadCallback, _maxLoadedDataSize, _maxNodeSize, _uniqueIndex){
 		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('collectionName must be a non-empty string');
 		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('indexName must be a non-empty string');
 		if (!(collectionKey instanceof Uint8Array && collectionKey.length == 32)) throw new TypeError('collectionKey must be a 32-byte Uint8Array');
 		if (!(Array.isArray(pearsonSeed) && pearsonSeed.length == 256)) throw new TypeError('pearsonSeed must be an array containing a permutation of integers in the range [0; 255]');
+		if (!indexKeyType) indexKeyType = 'string';
+		checkIndexKeyType(indexKeyType);
 		if (typeof loadCallback != 'function') throw new TypeError('loadCallback must be a function');
 		if (_maxLoadedDataSize && !(typeof _maxLoadedDataSize == 'number' && Math.floor(_maxLoadedDataSize) == _maxLoadedDataSize) && _maxLoadedDataSize > 0) throw new TypeError('when defined, _maxLoadedDataSize must be a strictly positive integer');
 		if (_maxNodeSize && !(typeof _maxNodeSize == 'number' && Math.floor(_maxNodeSize) == _maxNodeSize && _maxNodeSize > 0)) throw new TypeError('when defined, _maxNodeSize must be a strictly positive integer');
 
 		var self = this;
+
+		if (indexKeyType == 'boolean'){
+			//If indexType == 'boolean', this Index instance wraps a BooleanIndex instance, and that's it
+			var boolIndex = new BooleanIndex(rootPath, collectionName, indexName, collectionKey, pearsonSeed, function(loadErr){
+				if (loadErr){
+					loadCallback(loadErr);
+					return;
+				}
+
+				self.add = boolIndex.add;
+				self.remove = boolIndex.remove;
+				self.lookup = boolIndex.lookup;
+
+				loadCallback();
+			}, _maxLoadedDataSize, _maxNodeSize);
+
+			return;
+		}
 
 		var collectionPath = rootPath ? pathJoin(rootPath, collectionName) : collectionName;
 
@@ -4651,6 +4678,64 @@
 		}
 	}
 
+	function BooleanIndex(rootPath, collectionName, indexName, collectionKey, pearsonSeed, loadCallback, _maxLoadedDataSize, _maxNodeSize){
+		var boolIndex = new Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, 'string', loadCallback, _maxLoadedDataSize, _maxNodeSize, true); //Cannot have more than one value per docId, hence unique == true
+
+		var self = this;
+
+		//This boolean index can be seen as a hybrid between a set and key-value store.
+		//Hence, all the operations that might be needed are 'add', 'remove' and 'lookup'
+
+		self.lookup = function(boolVal, cb){
+			if (typeof cb != 'function') throw new TypeError('cb must be a function');
+			if (typeof boolVal != 'boolean'){
+				cb(new TypeError('boolVal must be a boolean'));
+				return;
+			}
+
+			var matches = [];
+
+			function mapFn(subset){
+				var subsetKeys = Object.keys(subset);
+				for (var i = 0; i < subsetKeys.length; i++){
+					//Check boolVal for subset[subsetKeys[i]] and add to matches
+					if (subset[subsetKeys[i]] === boolVal) matches.push(subsetKeys[i]);
+				}
+			}
+
+			boolIndex.map(mapFn, function(err){
+				cb(err, matches);
+			}, undefined, true);
+		};
+
+		self.add = function(boolVal, docId, cb, noTrigger, replace){
+			boolIndex.add(docId, boolVal, cb, noTrigger, replace);
+		};
+
+		self.remove = function(boolVal, docId, cb, noTrigger){
+			if (!docId) throw new TypeError('In a boolean index, value cannot be null/undefined');
+
+			boolIndex.remove(docId, boolVal, cb, noTrigger);
+		};
+
+		/*self.nodeIterator = function(){
+
+		};
+
+		self.iterator = function(){
+
+		};
+
+		self.map = function(mapFn, cb, limit, forQuery){
+
+		};*/
+
+		self.indexType = function(){
+			return 'boolean';
+		};
+
+	}
+
 	function PearsonSeedGenerator(){
 		var orderingRandomData = randomBuffer(1024); //256 * 4
 		var orderingArray = new Array(256);
@@ -4696,7 +4781,7 @@
 	*/
 	function checkHashable(d){
 		var td = typeof d;
-		if (!((d instanceof Uint8Array || td == 'string') && d.length > 0) && !(td == 'number' || td == 'boolean') && !(d instanceof Date)) throw new TypeError('key must be either a Uint8Array, a string, a date, a number or a boolean');
+		if (!((d instanceof Uint8Array || td == 'string') && d.length > 0) && td != 'number' && !(d instanceof Date)) throw new TypeError('key must be either a Uint8Array, a string, a date or a number');
 
 		if (td == 'object'){
 			if (d instanceof Uint8Array) td = 'uint8array';
@@ -4969,7 +5054,7 @@
 			//if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
 
 			var valType = typeof value;
-			if (!(valType == 'string' || valType == 'number' || valType == 'object')) throw new TypeError('value must either be a string, a number, or a JSON object');
+			if (!(valType == 'string' || valType == 'number' || valType == 'boolean' || valType == 'object')) throw new TypeError('value must either be a string, a number, a boolean or a JSON object');
 
 			if (_withHash){
 				if (!(_withHash instanceof Uint8Array && _withHash.length == 8)) throw new TypeError('if _withHash is provided, it must be an 8 byte Uint8Array');
