@@ -50,10 +50,3 @@ assert(to_hex(ph(n)) == to_hex(ph(n)));
 assert(to_hex(ph(n)) == to_hex(ph(nRounded)));
 assert(to_hex(ph(n)) != to_hex(ph(nPlusOne)));
 assert(to_hex(ph(n)) != to_hex(ph(nMinusOne)));
-
-//Booleans
-//Stress testing boolean hashing and reversing
-for (var i = 0; i < 1000; i++){
-	assert(ph.reverseBoolean(ph(true)) == true);
-	assert(ph.reverseBoolean(ph(false)) == false);
-}
