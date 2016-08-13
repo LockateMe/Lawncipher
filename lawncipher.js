@@ -11,7 +11,7 @@
 		define(['exports', 'sodium', 'console', _nodeContext.toString(), 'require', 'window', 'Long'], factory);
 	} else if (typeof exports !== 'undefined'){
 		var libsodium = require('libsodium-wrappers');
-		process.removeAllListeners('uncaughtException'); //Removing the catch-all exception handler of libsodium
+		if (process && typeof process.removeAllListeners == 'function') process.removeAllListeners('uncaughtException'); //Removing the catch-all exception handler of libsodium, if possible
 
 		factory(exports, libsodium, console, _nodeContext, require, !_nodeContext ? window : undefined, require('long'));
 	} else {
