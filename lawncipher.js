@@ -10,7 +10,10 @@
 	if (typeof define === 'function' && define.amd){
 		define(['exports', 'sodium', 'console', _nodeContext.toString(), 'require', 'window', 'Long'], factory);
 	} else if (typeof exports !== 'undefined'){
-		factory(exports, require('libsodium-wrappers'), console, _nodeContext, require, !_nodeContext ? window : undefined, require('long'));
+		var libsodium = require('libsodium-wrappers');
+		process.removeAllListeners('uncaughtException'); //Removing the catch-all exception handler of libsodium
+
+		factory(exports, libsodium, console, _nodeContext, require, !_nodeContext ? window : undefined, require('long'));
 	} else {
 		var cb = root.Lawncipher && root.Lawncipher.onload;
 		factory((root.Lawncipher = {}), sodium, console, _nodeContext, typeof require != 'undefined' && require, !_nodeContext ? window : undefined, window.dcodeIO.Long);
@@ -1092,7 +1095,16 @@
 								collectionIndexModel = collectionMeta.indexModel;
 								indexesSeeds = collectionMeta.indexesSeeds;
 
-								collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, 'collection', function(loadIndexErr){
+								var indexSettings = {
+									rootPath: rootPath,
+									collectionName: collectionName,
+									indexName: 'index',
+									collectionKey: k,
+									pearsonSeed: indexesSeeds._index,
+									indexKeyType: 'collection',
+								};
+
+								collectionIndex = new Index(indexSettings, function(loadIndexErr){
 									if (loadIndexErr){
 										console.error('Load error - cannot init the collection index: ' + err);
 										cb(err);
@@ -1131,7 +1143,16 @@
 										return;
 									}
 
-									collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, 'collection', function(loadIndexErr){
+									var indexSettings = {
+										rootPath: rootPath,
+										collectionName: collectionName,
+										indexName: 'index',
+										collectionKey: k,
+										pearsonSeed: indexesSeeds._index,
+										indexKeyType: 'collection',
+									};
+
+									collectionIndex = new Index(indexSettings, function(loadIndexErr){
 										if (err){
 											console.error('Load error - cannot inint the collection index: ' + err);
 											cb(err);
@@ -1229,6 +1250,7 @@
 						try {
 							serializedIndex = JSON.parse(decryptedIndexStr);
 						} catch (e){
+							console.error('Decrypted index cannot be parsed');
 							cb('INVALID_INDEX');
 							return;
 						}
@@ -1246,7 +1268,16 @@
 						var collectionIndexSeed = PearsonSeedGenerator();
 						indexesSeeds._index = collectionIndexSeed;
 
-						collectionIndex = new Index(rootPath, collectionName, 'index', k, indexesSeeds._index, 'collection', function(loadIndexErr){
+						var collectionIndexSettings = {
+							rootPath: rootPath,
+							collectionName: collectionName,
+							indexName: 'index',
+							collectionKey: k,
+							pearsonSeed: indexesSeeds._index,
+							indexKeyType: 'collection',
+						};
+
+						collectionIndex = new Index(collectionIndexSettings, function(loadIndexErr){
 							if (loadIndexErr){
 								console.error('Migration error - cannot init the Index instance: ' + err);
 								cb(err);
@@ -1359,7 +1390,8 @@
 						}
 
 						initIndex(function(err){
-							//New index. Load key-value pairs into it...
+							//TODO: New index. Load key-value pairs into it...
+							console.error('New index : must load key-value pairs into it...');
 
 							cb();
 						});
@@ -1374,7 +1406,19 @@
 
 				function initIndex(next){
 					var currentIndexType = collectionIndexModel[fieldName].type || 'string'; //Initialize the index with the field's type. Default to string, if weirdly the indexed field has no type
-					var i = new Index(rootPath, collectionName, '_' + fieldName, k, indexesSeeds[fieldName], currentIndexType, function(loadSearchIndex){
+					var currentIndexUnique = collectionIndexModel[fieldName].unique || false;
+
+					var currentSearchIndexSettings = {
+						rootPath: rootPath,
+						collectionName: collectionName,
+						indexName: '_' + fieldName,
+						collectionKey: k,
+						pearsonSeed: indexesSeeds[fieldName],
+						indexKeyType: currentIndexType,
+						uniqueIndex: currentIndexUnique,
+					};
+
+					var i = new Index(currentSearchIndexSettings, function(loadSearchIndex){
 						if (loadIndexErr){
 							next(loadIndexErr);
 							return;
@@ -3882,22 +3926,43 @@
 		return bCopy;
 	}
 
-	function Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, indexKeyType, loadCallback, _maxLoadedDataSize, _maxNodeSize, _uniqueIndex){
-		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('collectionName must be a non-empty string');
-		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('indexName must be a non-empty string');
-		if (!(collectionKey instanceof Uint8Array && collectionKey.length == 32)) throw new TypeError('collectionKey must be a 32-byte Uint8Array');
-		if (!(Array.isArray(pearsonSeed) && pearsonSeed.length == 256)) throw new TypeError('pearsonSeed must be an array containing a permutation of integers in the range [0; 255]');
+	function Index(settings, loadCallback){
+		if (typeof settings != 'object') throw new TypeError('settings must be an object');
+
+		var rootPath = settings.rootPath,
+			collectionName = settings.collectionName,
+			indexName = settings.indexName,
+			collectionKey = settings.collectionKey,
+			pearsonSeed = settings.pearsonSeed,
+			indexKeyType = settings.indexKeyType,
+			_uniqueIndex = settings.uniqueIndex,
+			_maxLoadedDataSize = settings._maxLoadedDataSize
+			_maxNodeSize = settings._maxNodeSize;
+
+		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('settings.collectionName must be a non-empty string');
+		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('settings.indexName must be a non-empty string');
+		if (!(collectionKey instanceof Uint8Array && collectionKey.length == 32)) throw new TypeError('settings.collectionKey must be a 32-byte Uint8Array');
+		if (!(Array.isArray(pearsonSeed) && pearsonSeed.length == 256)) throw new TypeError('settings.pearsonSeed must be an array containing a permutation of integers in the range [0; 255]');
 		if (!indexKeyType) indexKeyType = 'string';
 		checkIndexKeyType(indexKeyType);
 		if (typeof loadCallback != 'function') throw new TypeError('loadCallback must be a function');
-		if (_maxLoadedDataSize && !(typeof _maxLoadedDataSize == 'number' && Math.floor(_maxLoadedDataSize) == _maxLoadedDataSize) && _maxLoadedDataSize > 0) throw new TypeError('when defined, _maxLoadedDataSize must be a strictly positive integer');
-		if (_maxNodeSize && !(typeof _maxNodeSize == 'number' && Math.floor(_maxNodeSize) == _maxNodeSize && _maxNodeSize > 0)) throw new TypeError('when defined, _maxNodeSize must be a strictly positive integer');
+		if (_maxLoadedDataSize && !(typeof _maxLoadedDataSize == 'number' && Math.floor(_maxLoadedDataSize) == _maxLoadedDataSize) && _maxLoadedDataSize > 0) throw new TypeError('when defined, settings._maxLoadedDataSize must be a strictly positive integer');
+		if (_maxNodeSize && !(typeof _maxNodeSize == 'number' && Math.floor(_maxNodeSize) == _maxNodeSize && _maxNodeSize > 0)) throw new TypeError('when defined, settings._maxNodeSize must be a strictly positive integer');
 
 		var self = this;
 
 		if (indexKeyType == 'boolean'){
 			//If indexType == 'boolean', this Index instance wraps a BooleanIndex instance, and that's it
-			var boolIndex = new BooleanIndex(rootPath, collectionName, indexName, collectionKey, pearsonSeed, function(loadErr){
+			var boolIndexSettings = {
+				rootPath: rootPath,
+				collectionName: collectionName,
+				indexName: indexName,
+				collectionKey: collectionKey,
+				pearsonSeed: pearsonSeed,
+				_maxLoadedDataSize: _maxLoadedDataSize,
+				_maxNodeSize: _maxNodeSize,
+			};
+			var boolIndex = new BooleanIndex(boolIndexSettings, function(loadErr){
 				if (loadErr){
 					loadCallback(loadErr);
 					return;
@@ -3911,7 +3976,7 @@
 				self.map = boolIndex.map;
 
 				loadCallback();
-			}, _maxLoadedDataSize, _maxNodeSize);
+			});
 
 			return;
 		}
@@ -4540,8 +4605,13 @@
 		}
 	}
 
-	function BooleanIndex(rootPath, collectionName, indexName, collectionKey, pearsonSeed, loadCallback, _maxLoadedDataSize, _maxNodeSize){
-		var boolIndex = new Index(rootPath, collectionName, indexName, collectionKey, pearsonSeed, 'string', loadCallback, _maxLoadedDataSize, _maxNodeSize, true); //Cannot have more than one value per docId, hence unique == true
+	function BooleanIndex(settings, loadCallback){
+		//Overriding some settings to make them "BooleanIndex"-compatible
+		settings = shallowCopy(settings);
+		settings.indexKeyType = 'string';
+		settings.uniqueIndex = true;
+
+		var boolIndex = new Index(settings, loadCallback); //Cannot have more than one value per docId, hence unique == true
 
 		var self = this;
 

@@ -76,6 +76,7 @@ function clock(s){
 
 function basicTests(next, type){
 	var indexKey = randomBuffer(32);
+	var testIndexSettings;
 
 	var k1, k2;
 	var v1, v2;
@@ -97,7 +98,16 @@ function basicTests(next, type){
 				v2 = 'test';
 			} else throw new Error('unknown index type:' + type);
 
-			var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, type, function(loadErr){
+			testIndexSettings = {
+				rootPath: __dirname,
+				collectionName: 'test_index',
+				indexName: 'index',
+				collectionKey: indexKey,
+				pearsonSeed: testSeed,
+				indexKeyType: type,
+			};
+
+			var testIndex = new Index(testIndexSettings, function(loadErr){
 				if (loadErr) throw loadErr;
 
 				testIndex.add(k1, v1, function(e){
@@ -114,7 +124,7 @@ function basicTests(next, type){
 	}
 
 	function loadIndex(_next){
-		var testIndex = new Index(__dirname, 'test_index', 'index', indexKey, testSeed, type, function(loadErr){
+		var testIndex = new Index(testIndexSettings, function(loadErr){
 			if (loadErr) throw loadErr;
 
 			testIndex.lookup(k1, function(err, value){
@@ -151,6 +161,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 	var testIndex;
 	var indexKey = randomBuffer(32);
 	var indexSeed = PearsonSeedGenerator();
+	var testIndexSettings;
 
 	var dataSet = new Array(docCount);
 
@@ -181,13 +192,23 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 		throw new TypeError('unknown index type: ' + indexType);
 	}
 
+	testIndexSettings = {
+		rootPath: __dirname,
+		collectionName: 'test_index',
+		indexName: 'index',
+		collectionKey: indexKey,
+		pearsonSeed: indexSeed,
+		indexKeyType: indexType,
+		uniqueIndex: unique,
+	};
+
 	function saveIndex(_next){
 		rmdirr(testIndexPath, function(err){
 			if (err) throw err;
 
 			console.log('Starting index writes');
 			var saveStart = clock();
-			testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, indexType, function(loadErr){
+			testIndex = new Index(testIndexSettings, function(loadErr){
 				if (loadErr) throw loadErr;
 
 				console.log('Saving ' + docCount + ' documents' + (usingNoTrigger ? ' (while using noTrigger = true)' : ''));
@@ -232,13 +253,13 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 
 					addOne();
 				}
-			}, undefined, undefined, unique);
+			});
 		});
 	}
 
 	function loadIndex(_next){
 		var loadStart = clock();
-		testIndex = new Index(__dirname, 'test_index', 'index', indexKey, indexSeed, indexType, function(loadErr){
+		testIndex = new Index(testIndexSettings, function(loadErr){
 			if (loadErr) throw loadErr;
 
 			console.log('Loading and looking up ' + docCount + ' documents');
@@ -314,7 +335,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 					});
 				});
 			}
-		}, undefined, undefined, unique);
+		});
 	}
 
 	function destroyIndex(_next){
