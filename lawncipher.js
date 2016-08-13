@@ -1331,10 +1331,20 @@
 				loadOne();
 			}
 
+			/**
+			* Load or create a search index
+			* @private
+			* @param {String} fieldName of the field to be indexed
+			*/
 			function loadSearchIndex(fieldName, cb){
 				//fieldName _index is disallowed, by design (conflicting with the collection's central index)
 				if (fieldName == '_index'){
 					cb();
+					return;
+				}
+
+				if (!collectionIndexModel[fieldName]){
+					cb(new Error('field "' + fieldName + '" cannot be found in the collectionIndexModel'));
 					return;
 				}
 
@@ -1348,26 +1358,30 @@
 							return;
 						}
 
-						initIndex();
+						initIndex(function(err){
+							//New index. Load key-value pairs into it...
+
+							cb();
+						});
 					});
 				} else {
 					//The index seems to already exist, as it has a seed.
 					//Checking files presence, just to be sure.
 
-					initIndex();
+					initIndex(cb);
 				}
 
 
-				function initIndex(){
+				function initIndex(next){
 					var currentIndexType = collectionIndexModel[fieldName].type || 'string'; //Initialize the index with the field's type. Default to string, if weirdly the indexed field has no type
 					var i = new Index(rootPath, collectionName, '_' + fieldName, k, indexesSeeds[fieldName], currentIndexType, function(loadSearchIndex){
 						if (loadIndexErr){
-							cb(loadIndexErr);
+							next(loadIndexErr);
 							return;
 						}
 
 						searchIndices[fieldName] = i;
-						cb();
+						next();
 					});
 				}
 			}
@@ -1675,18 +1689,18 @@
 				}
 
 				//Detect unicity and id changes
-				if (currentIdField !== idField){
+				/*if (currentIdField !== idField){
 					console.error('Modifying which field is the "Id" field is currently forbidden and unsupported in Lawncipher. Watch out for future releases...');
 					cb('ID_FIELD_MODIFICATION_FORBIDDEN');
 					return;
-				}
+				}*/
 
 				//Detecting unicity flags changes
 				var uniqueFieldsAdditions = [];
 				var uniqueFieldsDeletions = [];
 
 				//Detecting unicity deletion
-				for (var i = 0; i < currentUniqueFields.length; i++){
+				for (var i = 0; currentUniqueFields && i < currentUniqueFields.length; i++){
 					var currentUniqueField = currentUniqueFields[i];
 					var currentFieldFound = false;
 					for (var j = 0; j < uniqueFields.length; j++){
@@ -1703,7 +1717,7 @@
 				for (var i = 0; i < uniqueFields.length; i++){
 					var newUniqueField = uniqueFields[i];
 					var newFieldFound = false;
-					for (var j = 0; j < currentUniqueFields.length; j++){
+					for (var j = 0; currentUniqueFields && j < currentUniqueFields.length; j++){
 						if (currentUniqueFields[j] == newUniqueField){
 							newFieldFound = true;
 							break;
