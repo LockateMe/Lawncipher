@@ -7,6 +7,7 @@
   - [ ] add a method to make a "dry run" of a indexModel change. The method will iterate and validate each document against the new indexModel. No change will be made on the docs/collection though. But this method can prevent us from having to design a "rollback"-able indexModel change...
   - [ ] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable
 - [ ] Add more "unique" & "index" flags test vectors
+- [ ] Add tests for 0-node tree iteration
 - [x] Add `meta.indexVersions`, to store the index file and formats versions
 - [ ] indexes on `index: true` flag in indexModel. will work best string, buffers, boolean(what about largely uneven distribution?) and dates(?)
   - [x] ~~boolean index, 2 subtrees~~
@@ -21,7 +22,7 @@
   - [x] dates & number index
     - [x] ~~-> get inspired by cryptDB~~
     - [x] string encoding for numbers (and decimals!), that respect order/lexicographical relation. But that won't fix the problem you will have with the Pearson hashing function (loss of order)
-  - [ ] `$fuzzy`, `$contain`/`$like`, `$fuzzylike`  matching on strings, for Lawncipher v2.1?
+- [ ] `$fuzzy`, `$contain`/`$like`, `$fuzzylike`  matching on strings, for Lawncipher v2.1?
 - [x] use indexes for unique value and id existence checks
 - [ ] use indexes in compound queries, using them to build a data subset when possible (on which the rest of the query will be ran)
 - [ ] Write some more `save` and `bulkSave` examples
