@@ -562,6 +562,14 @@
 		initCalled = true;
 	}
 
+	/**
+	* @typedef {(String|Number|Date|Uint8Array)} DocId
+	*/
+
+	/**
+	* @typedef {String} FieldName
+	*/
+
 	exports.db = Lawncipher;
 
 	function Lawncipher(rootPath, _fs){
@@ -1710,7 +1718,7 @@
 			/**
 			* Check whether a transition to a given index model is possible, given the collection's existing documents
 			* @param {Object} indexModel - the indexModel to be tested
-			* @param {Function} cb - callback function, that receives (err, isCompatible, offendingDocs). `err` is an error, and is defined if one occurred. `isCompatible` is a boolean describing whether the model is compatible with the collection's documents. `offendingDocs` is a Hash<DocId, Hash<FieldName, Reason>>, describing the documents that "made the indexModel not compatible"
+			* @param {Function} cb - callback function, that receives (err, isCompatible, offendingDocs, newIndexes, deleteIndexes). `err` is an error, and is defined if one occurred. `isCompatible` is a boolean describing whether the model is compatible with the collection's documents. `offendingDocs` is a Hash<DocId, Hash<FieldName, Reason>>, describing the documents that "made the indexModel not compatible". `newIndexes` is the list of fields that require a new index to be created for them, as opposed to `deleteIndexes` that list the indexes to be deleted
 			*/
 			this.isIndexModelCompatible = function(indexModel, cb){
 				if (typeof indexModel != 'object') throw new TypeError('indexModel must be an object');
@@ -1731,29 +1739,32 @@
 				//Detect the fields that are already unique and the one that determines documents' IDs
 				var currentIdField;
 				var currentUniqueFields;
+				var currentSearchIndexFields;
 
 				if (collectionIndexModel){
 					for (var indexField in collectionIndexModel){
 						if (collectionIndexModel[indexField].id) currentIdField = indexField;
-						else if (collectionIndexModel[indexField].unique) ((currentUniqueFields && currentUniqueFields.push(indexField)) || currentUniqueFields.push(indexField));
+						else if (collectionIndexModel[indexField].unique){
+							if (currentUniqueFields) currentUniqueFields.push(indexField);
+							else currentUniqueFields = [indexField];
+						}
+						if (collectionIndexModel[indexField].index && indexField != currentIdField){
+							if (currentSearchIndexFields) currentSearchIndexFields.push(indexField);
+							else currentSearchIndexFields = [indexField];
+						}
 					}
 				}
 
 				//Detect the field that will need to become unique or that will determine the document IDs
 				var idField;
 				var uniqueFields = [];
+				var searchIndexFields = [];
 
 				for (var indexField in indexModel){
 					if (indexModel[indexField].id) idField = indexField;
 					else if (indexModel[indexField].unique) uniqueFields.push(indexField);
+					if (indexModel[indexField].index && indexField != idField) searchIndexFields.push(indexField);
 				}
-
-				//Detect unicity and id changes
-				/*if (currentIdField !== idField){
-					console.error('Modifying which field is the "Id" field is currently forbidden and unsupported in Lawncipher. Watch out for future releases...');
-					cb('ID_FIELD_MODIFICATION_FORBIDDEN');
-					return;
-				}*/
 
 				//Detecting unicity flags changes
 				var uniqueFieldsAdditions = [];
@@ -1787,13 +1798,37 @@
 					if (!newFieldFound) uniqueFieldsAdditions.push(newUniqueField);
 				}
 
-				/*if (currentIdField && idField && currentIdField != idField){
-					cb(new Error('ID_FIELD_CHANGE_FORBIDDEN'));
-					return;
-				} else if (currentIdField && !idField){
-					cb(new Error('ID_FIELD_REMOVAL_FORBIDDEN'));
-					return;
-				}*/
+				//Detecting index flag changes
+				var indexAdditions = [];
+				var indexDeletions = [];
+
+				//Detecting index flag deletion
+				for (var i = 0; currentSearchIndexFields && i < currentSearchIndexFields.length; i++){
+					var currentIndexField = currentSearchIndexFields[i];
+					var currentFieldFound = false;
+					for (var j = 0; j < searchIndexFields.length; j++){
+						if (searchIndexFields[j] == currentIndexField){
+							currentFieldFound = true;
+							break;
+						}
+					}
+
+					if (!currentFieldFound) indexDeletions.push(currentIndexField);
+				}
+
+				//Detecting index flag addition
+				for (var i = 0; searchIndexFields.length; i++){
+					var newIndexField = searchIndexFields[i];
+					var newFieldFound = false;
+					for (var j = 0; currentSearchIndexFields && j < currentSearchIndexFields.length; j++){
+						if (currentSearchIndexFields[j] == newIndexField){
+							newFieldFound = true;
+							break;
+						}
+					}
+
+					if (!newFieldFound) indexAdditions.push(newIndexField);
+				}
 
 				var indexNodeIterator = collectionIndex.nodeIterator();
 				var currentNode;
@@ -1863,7 +1898,7 @@
 					}
 
 					/* Verifying field/id unicity
-					* For each added field, check unicity for that field
+					* For each added field and for an Id change, check unicity for that field
 					* For each removed field,... well there is nothing to do...
 					*/
 
@@ -3299,6 +3334,80 @@
 
 		}
 
+		/**
+		* @typedef {Object/
+		*/
+
+		/**
+		* @typedef {Object.<FieldName, } Reasons
+		*/
+
+		/**
+		* @private
+		* @callback fieldsGlobalUnicityCallback
+		* @param {Error|String} e - an error, if one occured
+		* @param {Boolean} areUnique - a boolean simply stating if all the unicity checks passed or not
+		* @param {Object.<DocId, Reasons>} offendingDocs - an object describing the which documents of the collection "offended" the unicity constraints, and for which fields
+		* @param {Object.<String, }
+		*/
+
+		/**
+		* Check the unicity of a list of fields, across the entire collection
+		* @param {Array<String>} fieldsList - an array containing the names of the fields that need to be checked
+		* @param {Function} cb - callback function receiving (err, areUnique, offendingDocs, resultingTrees)
+		*/
+		function fieldsGlobalUnicity(fieldsList, cb){
+			if (typeof cb != 'function') throw new TypeError('cb must be a function');
+			if (!(Array.isArray(fieldsList) && fieldsList.length > 0)) throw new TypeError('fieldsList must be a non-empty array');
+
+			//Unicity trees initialization
+			var unicitySets = {};
+			//Information about the documents that offend the "unicity" constraint
+			var offendingDocs = {};
+			var offendingDocsCount = 0;
+
+			function addOffendingReason(docId, field, reason){
+				if (offendingDocs[docId]){
+					offendingDocs[docId][field].push(reason);
+				} else {
+					offendingDocs[docId] = {};
+					offendingDocs[docId][field] = [reason];
+					offendingDocsCount++;
+				}
+			}
+
+			for (var i = 0; i < fieldsList.length; i++){
+				if (typeof fieldsList[i] != 'string') throw new TypeError('fieldsList must be an array containing only strings');
+			}
+
+			for (var i = 0; i < fieldsList.length; i++){
+				unicitySets[fieldsList[i]] = {seed: PearsonSeedGenerator()};
+				unicitySets[fieldsList[i]].hasher = PearsonHasher(unicitySets[fieldsList[i]].seed);
+				unicitySets[fieldsList[i]].tree = new PearsonBPlusTree(unicitySets[fieldsList[i]].hasher, undefined, true);
+			}
+
+			function mapFn(nodeSubset){
+				var nodeSubsetKeysList = Object.keys(nodeSubset);
+				for (var i = 0; i < nodeSubsetKeysList.length; i++){
+					for (var j = 0; j < fieldsList.length; j++){
+						//Check that current field is available in the current document. If not, go to next field for the current document
+						if (!nodeSubset[nodeSubsetKeysList[i]].index[fieldsList[j]]) continue;
+						//Add the current field's value, as a <fieldValue, docId> pair, for the current document, without triggering IO events. Catch potential collisionning errors
+						try {
+							unicitySets[fieldsList[j]].tree.add(nodeSubset[nodeSubsetKeysList[i]].index[fieldsList[j]], nodeSubsetKeysList[i], true);
+						} catch (e){
+							if (e instanceof RangeError) addOffendingReason(nodeSubsetKeysList[i], fieldsList[j], 'non-unique');
+							else console.error('Unexpected error when checking adding field ' + fieldsList[j] + ' for doc ' + nodeSubsetKeysList[i] + ': ' + JSON.stringify(e));
+						}
+					}
+				}
+			}
+
+			collectionIndex.map(mapFn, function(err){
+				cb(err, !err && offendingDocsCount == 0, !err ? offendingDocs : undefined, !err ? unicitySets : undefined);
+			}, undefined, true);
+		}
+
 		function concatBuffers(buffers){
 			if (!Array.isArray(buffers)) return;
 
@@ -3955,15 +4064,28 @@
 			_maxLoadedDataSize = settings._maxLoadedDataSize
 			_maxNodeSize = settings._maxNodeSize;
 
+		//Checking the type and lenght of rootPath
+		if (!(typeof rootPath == 'string' && rootPath.length > 0)) throw new TypeError('setting.rootPath must be a non-empty string');
+		//Checking the type and length of collectionName
 		if (!(typeof collectionName == 'string' && collectionName.length > 0)) throw new TypeError('settings.collectionName must be a non-empty string');
+		//Checking the type and length of indexName
 		if (!(typeof indexName == 'string' && indexName.length > 0)) throw new TypeError('settings.indexName must be a non-empty string');
+		//Checking the type and length of collectionKey
 		if (!(collectionKey instanceof Uint8Array && collectionKey.length == 32)) throw new TypeError('settings.collectionKey must be a 32-byte Uint8Array');
+		//Checking the type and length of pearsonSeed
 		if (!(Array.isArray(pearsonSeed) && pearsonSeed.length == 256)) throw new TypeError('settings.pearsonSeed must be an array containing a permutation of integers in the range [0; 255]');
+		//Defaulting to indexKeyType == 'string'
 		if (!indexKeyType) indexKeyType = 'string';
+		//Checking whether the requested index type is valid
 		checkIndexKeyType(indexKeyType);
+		//Checking that a callback has indeed been given
 		if (typeof loadCallback != 'function') throw new TypeError('loadCallback must be a function');
+		//Checking that, if defined, _maxLoadedDataSize is a strictly positive integer number
 		if (_maxLoadedDataSize && !(typeof _maxLoadedDataSize == 'number' && Math.floor(_maxLoadedDataSize) == _maxLoadedDataSize) && _maxLoadedDataSize > 0) throw new TypeError('when defined, settings._maxLoadedDataSize must be a strictly positive integer');
+		//Checking that, if defined, _maxNodeSize is a strictly positive integer number
 		if (_maxNodeSize && !(typeof _maxNodeSize == 'number' && Math.floor(_maxNodeSize) == _maxNodeSize && _maxNodeSize > 0)) throw new TypeError('when defined, settings._maxNodeSize must be a strictly positive integer');
+		//Checking that, if defined, _preloadedTree is indeed a PearsonBPlusTree instance
+		if (settings._preloadedTree && !(settings._preloadedTree instanceof PearsonBPlusTree)) throw new TypeError('When ')
 
 		var self = this;
 
@@ -4053,7 +4175,8 @@
 		var fragmentsLRU = new LRUStringSet();
 
 		var theHasher = PearsonHasher(pearsonSeed);
-		var theTree = new PearsonBPlusTree(theHasher, _maxNodeSize || 53248, disallowKeyCollisions/*, _booleanMode*/); //Key collisions are disallowed on collection or "unique" searchIndex
+		var theTree = settings._preloadedTree;
+		if (!theTree) theTree = new PearsonBPlusTree(theHasher, _maxNodeSize || 53248, disallowKeyCollisions/*, _booleanMode*/); //Key collisions are disallowed on collection or "unique" searchIndex
 
 		var hashToLong = function(s, isLookup){
 			return bufferBEToLong(theHasher(s, isLookup), isLookup);
@@ -4371,6 +4494,10 @@
 			}
 
 			nextNode();
+		};
+
+		self.getHasher = function(){
+			return theHasher;
 		};
 
 		function loadIndexFragmentForHash(h, _cb){
