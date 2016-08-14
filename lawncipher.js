@@ -1830,7 +1830,22 @@
 					if (!newFieldFound) indexAdditions.push(newIndexField);
 				}
 
+				var indexAndUniqueSets = {};
+				var indexAndUniqueFields = unionStringArrays(indexAdditions, uniqueFieldsAdditions);
+				for (var i = 0; i < indexAndUniqueFields.length; i++){
+					var uniqueField = !!indexModel[indexAndUniqueFields[i]].unique;
+					var newSeed = PearsonSeedGenerator();
+					var newHasher = PearsonHasher(newSeed);
+					var newTree = new PearsonBPlusTree(newHasher, undefined, uniqueField);
+					indexAndUniqueSets[indexAndUniqueFields[i]] = {
+						seed: newSeed,
+						hasher: newHasher,
+						tree: newTree,
+					};
+				}
+
 				var indexNodeIterator = collectionIndex.nodeIterator();
+				var nodeCount = 0;
 				var currentNode;
 
 				var offendingDocs = {};
@@ -1878,10 +1893,12 @@
 						*/
 						var typeMismatches = [];
 						var validationResult = validateIndexAgainstModel(currentDoc, indexModel);
+						var hadToBeCloned = false;
 						while (typeof validationResult == 'string'){ //validationResult contains the name of the offending field
 							if (typeMismatches.length == 0){
 								//First mismatch detected for the currentDoc -> clone(currentDoc) (because there is no object immutability in JS, unless you force it...);
 								currentDoc = clone(currentDoc);
+								hadToBeCloned = true;
 							}
 							delete currentDoc[validationResult];
 							typeMismatches.push(validationResult);
@@ -1892,16 +1909,31 @@
 						//We exited the loop -> what is left in currentDoc has types that are valid for the given indexModel
 						//Furthermore, the offending fields have their names in typeMismatches
 
+						//Restoring the currentDoc reference to its original state (as it was right before the typeMismatches loop)
+						if (hadToBeCloned) currentDoc = currentSubCollection[currentDocId].index;
+
+						//Adding the type mismatches to the offending reasons
 						for (var j = 0; j < typeMismatches.length; j++){
 							addOffendingReason(currentDocId, typeMismatches[j], 'type_mismatch');
 						}
+
+						/* Verifying field/id unicity
+						* For each added field and for an Id change, check unicity for that field
+						* For each removed field,... well there is nothing to do...
+						*/
+
+						for (var j = 0; j < indexAndUniqueFields.length; j++){
+							//Check that current field is available in the current document. If not, go to next field for the current document
+							if (!currentDoc[indexAndUniqueFields[j]]) continue;
+							//Add the current field's value, as a <fieldValue, docId> pair, for the current document, without triggering IO events. Catch potential collisionning errors
+							try {
+								indexAndUniqueSets[indexAndUniqueFields[j]].tree.add(currentDoc[indexAndUniqueFields[j]], currentDocId, true);
+							} catch (e){
+								if (e instanceof RangeError) addOffendingReason(currentDocId, indexAndUniqueFields[j], 'not_unique');
+								else console.error('Unexpected error when adding field ' + indexAndUniqueFields[j] + ' for doc ' + currentDocId + ': ' + JSON.stringify(e));
+							}
+						}
 					}
-
-					/* Verifying field/id unicity
-					* For each added field and for an Id change, check unicity for that field
-					* For each removed field,... well there is nothing to do...
-					*/
-
 
 					nextNode();
 				}
@@ -1915,26 +1947,37 @@
 							}
 
 							currentNode = _n;
-							processNode();
+							nodeCount++;
+							if (nodeCount % 100 === 0) setTimeout(processNode, 0);
+							else processNode();
 						});
 					} else {
-						cb(undefined, offendingDocsCount === 0, offendingDocs);
+						var modelIsValid = offendingDocsCount === 0;
+						var checkResults = {
+							offendingDocs: offendingDocs,
+							offendingDocsCount: offendingDocsCount,
+						};
+						if (modelIsValid) checkResults.indexAndUniqueSets = indexAndUniqueSets;
+						cb(undefined, isModelValid, checkResults);
 					}
 				}
 
 				nextNode();
 
-				/*function checkMapFn(indexedDoc, emit){
-					if (!indexedDoc.index) return; //The doc has no index data -> nothing to validate -> next doc
+				function unionStringArrays(a1, a2){
+					if (!Array.isArray(a1)) throw new TypeError('a1 must be an array');
+					if (!Array.isArray(a2)) throw new TypeError('a2 must be an array');
 
-					var validationResult = validateIndexAgainstModel(indexedDoc.index, indexModel);
-					if (validationResult){
-						emit({})
-						return;
+					var unicityHash = {};
+					for (var i = 0; i < a1.length; i++){
+						if (!unicityHash[a1[i]]) unicityHash[a1[i]] = true;
 					}
-				}
+					for (var i = 0; i < a2.length; i++){
+						if (!unicityHash[a2[i]]) unicityHash[a2[i]] = true;
+					}
 
-				collectionIndex.map(checkMapFn, cb);*/
+					return Object.keys(unicityHash);
+				}
 			};
 
 			this.save = function(doc, cb, overwrite, ttl, doNotWriteIndex){
@@ -3335,20 +3378,27 @@
 		}
 
 		/**
-		* @typedef {Object/
+		* @typedef {String[]} ReasonsList - an array of strings, that could contain the following values : 'type_mismatch', 'not_unique'
 		*/
 
 		/**
-		* @typedef {Object.<FieldName, } Reasons
+		* @typedef {Object.<FieldName, ReasonsList>} ReasonsOfField
+		*/
+
+		/**
+		* @typedef {Object} TreeAndSettings
+		* @property {PearsonSeed} seed - the Pearson seed generated for this tree
+		* @property {PearsonHasher} hasher - the Pearson hashing function, using the Pearson seed
+		* @property {PearsonBPlusTree} tree - the Pearson B+ tree, using the Pearson hashing function
 		*/
 
 		/**
 		* @private
 		* @callback fieldsGlobalUnicityCallback
-		* @param {Error|String} e - an error, if one occured
+		* @param {(Error|String)} e - an error, if one occured
 		* @param {Boolean} areUnique - a boolean simply stating if all the unicity checks passed or not
-		* @param {Object.<DocId, Reasons>} offendingDocs - an object describing the which documents of the collection "offended" the unicity constraints, and for which fields
-		* @param {Object.<String, }
+		* @param {Object.<DocId, ReasonsOfField>} offendingDocs - an object describing the which documents of the collection "offended" the unicity constraints, and for which fields
+		* @param {Object.<FieldName, TreeAndSettings>} resultingTrees - an object containing the search trees (and their seeds and hashers) constructed during the fieldsGlobalUnicity call
 		*/
 
 		/**
