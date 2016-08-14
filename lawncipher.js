@@ -4936,19 +4936,20 @@
 
 		if (dateGranularity){
 			if (!(typeof dateGranularity == 'number' && Math.floor(dateGranularity) == dateGranularity && dateGranularity > 0)) throw new TypeError('when defined, dateGranularity must be a strictly positive integer number')
-		} else dateGranularity = 1000; //By default, round to the nearest 1000ms (= to the nearest second)
+		} else dateGranularity = 1; //By default, keeps it precise up to the millisecond
 
 		var hasher = function(d, isLookup){
 			var td = checkHashable(d);
 
-			//Type conversions. Beware : the order here matters a lot...
+			//Type conversions. Beware : the order here matters
 			//Converts all the supported types to a Uint8Array
 			if (td == 'date'){
 				//Converts date to a number (then to a string), rounds the requested granularity (to the nearest second by default)
-				d = (Math.round(d.getTime() / dateGranularity) * dateGranularity).toString();
+				if (dateGranularity === 1) d = d.getTime().toString();
+				else d = (Math.round(d.getTime() / dateGranularity) * dateGranularity).toString();
 			} else if (td == 'number'){
 				//Converts rounding the number with the requested granularity and converting it to a string
-				if (numberGranularity == 1) d = Math.round(d).toString(); //Dodging the "divide-multiply by 1" operations if numberGranularity == 1
+				if (numberGranularity === 1) d = Math.round(d).toString(); //Dodging the "divide-multiply by 1" operations if numberGranularity == 1
 				else d = (Math.round(d / numberGranularity) * numberGranularity).toString();
 			}
 

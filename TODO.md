@@ -8,6 +8,7 @@
   - [ ] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable
 - [ ] Add more "unique" & "index" flags test vectors
 - [ ] Add tests for 0-node tree iteration
+- [x] Reduce the default dateGranularity to 1ms
 - [x] Add `meta.indexVersions`, to store the index file and formats versions
 - [ ] indexes on `index: true` flag in indexModel. will work best string, buffers, boolean(what about largely uneven distribution?) and dates(?)
   - [x] ~~boolean index, 2 subtrees~~

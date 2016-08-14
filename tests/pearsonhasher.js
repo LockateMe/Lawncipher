@@ -29,7 +29,7 @@ var testSeed = [
 	43, 119, 224, 71, 122, 142, 42, 160, 104, 48, 247, 103, 15, 11, 138, 239
 ];
 
-var ph = PearsonHasher(testSeed);
+var ph = PearsonHasher(testSeed, 8, 1, 1000);
 
 assert(to_hex(ph('test')) == '5ddc2eec38de9927');
 assert(to_hex(ph('hello')) == 'ef8c9f067bbfffa7');
