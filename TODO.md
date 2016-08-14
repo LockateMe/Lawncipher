@@ -7,7 +7,7 @@
   - [ ] add a method to make a "dry run" of a indexModel change. The method will iterate and validate each document against the new indexModel. No change will be made on the docs/collection though. But this method can prevent us from having to design a "rollback"-able indexModel change...
   - [ ] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable
 - [ ] Add more "unique" & "index" flags test vectors
-- [ ] Add `meta.indexVersions`, to store the index file and formats versions
+- [x] Add `meta.indexVersions`, to store the index file and formats versions
 - [ ] indexes on `index: true` flag in indexModel. will work best string, buffers, boolean(what about largely uneven distribution?) and dates(?)
   - [x] ~~boolean index, 2 subtrees~~
     * ~~one for `true`, one for `false`~~

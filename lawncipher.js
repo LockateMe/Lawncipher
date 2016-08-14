@@ -1033,7 +1033,8 @@
 
 			var collectionIndex; // The index instance, containing the <docId, doc> pairs
 			var searchIndices = {}; //<FieldName, Index>
-			var indexesSeeds = {};
+			var indexesSeeds = {}; //<FieldName, PearsonSeed>
+			var indexesFileFormatVersions = {}; //<FieldName, IndexFileFormatVersion>
 
 			for (var i = 0; i < rootIndex.length; i++){
 				if (rootIndex[i].name == name){
@@ -1094,6 +1095,7 @@
 
 								collectionIndexModel = collectionMeta.indexModel;
 								indexesSeeds = collectionMeta.indexesSeeds;
+								indexesFileFormatVersions = collectionMeta.indexesVersions;
 
 								var indexSettings = {
 									rootPath: rootPath,
@@ -1127,7 +1129,9 @@
 							var newMetaIndex = clone(collectionMetaFileModel);
 
 							indexesSeeds = {_index: PearsonSeedGenerator()};
+							indexesFileFormatVersions = {_index: 1};
 							newMetaIndex.indexesSeeds = indexesSeeds;
+							newMetaIndex.indexesVersions = indexesFileFormatVersions;
 
 							collectionMeta = newMetaIndex;
 
@@ -1267,6 +1271,7 @@
 						//Load tree
 						var collectionIndexSeed = PearsonSeedGenerator();
 						indexesSeeds._index = collectionIndexSeed;
+						indexesFileFormatVersions._index = 1;
 
 						var collectionIndexSettings = {
 							rootPath: rootPath,
@@ -1294,7 +1299,8 @@
 							collectionMeta = {
 								indexModel: documentsIndex.indexModel,
 								collectionBlobSize: documentsIndex.collectionSize,
-								indexesSeeds : indexesSeeds
+								indexesSeeds: indexesSeeds,
+								indexesVersions: indexesFileFormatVersions,
 							};
 
 							saveMetaIndex(function(err){
@@ -1367,7 +1373,7 @@
 			* @private
 			* @param {String} fieldName of the field to be indexed
 			*/
-			function loadSearchIndex(fieldName, cb){
+			function loadSearchIndex(fieldName, cb, loadData){
 				//fieldName _index is disallowed, by design (conflicting with the collection's central index)
 				if (fieldName == '_index'){
 					cb();
@@ -1383,6 +1389,7 @@
 					//This is a new index, as it doesn't have a seed yet.
 					//Generating one
 					indexesSeeds[fieldName] = PearsonSeedGenerator();
+					indexesFileFormatVersions[fieldName] = 1;
 					saveMetaIndex(function(err){
 						if (err){
 							cb(err);
@@ -1391,6 +1398,7 @@
 
 						initIndex(function(err){
 							//TODO: New index. Load key-value pairs into it...
+							//But should it really be done here? If we create more than one index at the same time, we better done one single iteration chain (for all indexes at once), rather than one iteration chain for each new index...
 							console.error('New index : must load key-value pairs into it...');
 
 							cb();
@@ -1398,7 +1406,11 @@
 					});
 				} else {
 					//The index seems to already exist, as it has a seed.
-					//Checking files presence, just to be sure.
+					//Checking files format version, just to be sure
+					if (indexesFileFormatVersions[fieldName] !== 1){
+						cb(new Error('Unsupported index file format: ' + indexesFileFormatVersions[fieldName]));
+						return;
+					}
 
 					initIndex(cb);
 				}
@@ -1514,6 +1526,10 @@
 					//Re-save the _meta file of the collection, with the index seed removed. Get out of the this deletion method through cb
 					saveMetaIndex(next);
 				}
+			}
+
+			function listExistingSearchIndexes(){
+				return Object.keys(indexesSeeds);
 			}
 
 			function docToBlobAndIndex(doc){
