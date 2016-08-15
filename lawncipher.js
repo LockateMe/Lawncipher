@@ -1550,11 +1550,11 @@
 			function deleteSearchIndexes(indexList, cb){
 				if (typeof cb != 'function') throw new TypeError('cb must be a function');
 				if (!Array.isArray(indexList)) throw new TypeError('indexList must be an array');
-				if (indexList.length == 0){
+				if (indexList.length === 0){
 					cb();
 					return;
 				}
-				for (var i = 0; indexList.length; i++) if (typeof indexList[i] != 'string') throw new TypeError('indexList must contain only strings');
+				for (var i = 0; i < indexList.length; i++) if (typeof indexList[i] != 'string') throw new TypeError('indexList must contain only strings');
 
 				//Chain deleteSearchIndex for each indexList element
 
