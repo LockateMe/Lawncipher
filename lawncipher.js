@@ -1361,13 +1361,14 @@
 						}
 
 						loadNext();
-					}, treeSettings && treeSettings[currentAttribute]);
+					}, treeSettings && treeSettings[currentAttribute], true); // true == Do not saveMetaIndex() right away after each new index...
 				}
 
 				function loadNext(){
 					loadIndex++;
 					if (loadIndex == indexList.length){
-						cb();
+						//Dodge "redundant" saveMetaIndex calls in loadSearchIndex. Call it only in the end.
+						saveMetaIndex(cb);
 					} else {
 						loadOne();
 					}
@@ -1381,7 +1382,7 @@
 			* @private
 			* @param {String} fieldName of the field to be indexed
 			*/
-			function loadSearchIndex(fieldName, cb, treeSettings){
+			function loadSearchIndex(fieldName, cb, treeSettings, doNotSaveMeta){
 				if (typeof fieldName != 'string') throw new TypeError('fieldName must be a string');
 				if (typeof cb != 'function') throw new TypeError('cb must be a function');
 				if (treeSettings){
@@ -1406,7 +1407,9 @@
 					//Generating one
 					indexesSeeds[fieldName] = (treeSettings && treeSettings.seed) || PearsonSeedGenerator();
 					indexesFileFormatVersions[fieldName] = 1;
-					saveMetaIndex(function(err){
+
+					if (doNotSaveMeta) initIndex(cb);
+					else saveMetaIndex(function(err){
 						if (err){
 							cb(err);
 							return;
@@ -1459,7 +1462,7 @@
 			* @param {String} fieldName - the name of the indexed field. A valid fieldName is part of the indexModel
 			* @param {Function} cb - callback function. Receives (err), where `err` is an error if one occurred
 			*/
-			function deleteSearchIndex(fieldName, cb){
+			function deleteSearchIndex(fieldName, cb, doNotSaveMeta){
 				//Checking whether the index exists
 				//Since the seed will be the last thing to be removed, so this test shall have few false positives
 				if (!indexesSeeds[fieldName]){
@@ -1535,9 +1538,51 @@
 					//Remove the index's seed from indexesSeeds, and the Index instance.
 					delete indexesSeeds[fieldName];
 					delete searchIndices[fieldName];
-					//Re-save the _meta file of the collection, with the index seed removed. Get out of the this deletion method through cb
-					saveMetaIndex(next);
+
+					if (doNotSaveMeta) next();
+					else {
+						//Re-save the _meta file of the collection, with the index seed removed. Get out of the this deletion method through cb
+						saveMetaIndex(next);
+					}
 				}
+			}
+
+			function deleteSearchIndexes(indexList, cb){
+				if (typeof cb != 'function') throw new TypeError('cb must be a function');
+				if (!Array.isArray(indexList)) throw new TypeError('indexList must be an array');
+				if (indexList.length == 0){
+					cb();
+					return;
+				}
+				for (var i = 0; indexList.length; i++) if (typeof indexList[i] != 'string') throw new TypeError('indexList must contain only strings');
+
+				//Chain deleteSearchIndex for each indexList element
+
+				var currentIndex = 0;
+				var currentIndexName;
+
+				function deleteOne(){
+					currentIndexName = indexList[currentIndex];
+					deleteSearchIndex(currentIndexName, function(err){
+						if (err){
+							cb(err);
+							return;
+						}
+
+						next();
+					}, !(currentIndex == indexList.length - 1)); //Dodge "redundant" saveMetaIndex.
+				}
+
+				function next(){
+					currentIndex++;
+					if (currentIndex == indexList.length) cb();
+					else {
+						if (currentIndex % 5 == 0) setTimeout(deleteOne, 0);
+						else deleteOne();
+					}
+				}
+
+				deleteOne();
 			}
 
 			function listExistingSearchIndexes(){
@@ -1545,7 +1590,7 @@
 			}
 
 			function docToBlobAndIndex(doc){
-				if (!doc) throw new TypeError('doc annto be undefined or null');
+				if (!doc) throw new TypeError('doc cannot be undefined or null');
 
 				var blob, index, ttl;
 
@@ -1681,7 +1726,9 @@
 					}
 
 					saveModel(function(){
-						loadAllSearchIndices(cb, checkResults.indexAndUniqueSets);
+						loadAllSearchIndices(function(){
+							deleteSearchIndexes(checkResults.indexDeletions, cb);
+						}, checkResults.indexAndUniqueSets);
 					});
 				});
 
@@ -1977,6 +2024,7 @@
 						var checkResults = {
 							offendingDocs: offendingDocs,
 							offendingDocsCount: offendingDocsCount,
+							indexDeletions: indexDeletions,
 						};
 						if (modelIsValid) checkResults.indexAndUniqueSets = indexAndUniqueSets;
 						cb(undefined, modelIsValid, checkResults);
@@ -4306,6 +4354,9 @@
 						loadCallback(err);
 						return;
 					}
+
+					//If the tree has been provided on construction, trigger the events, now that the event handlers have been bound
+					if (settings._preloadedTree) settings._preloadedTree.triggerEvents();
 
 					//If no index file is found, well there is only one "range fragment" to be availabe : the full range
 					fragmentsList = [PearsonRange.MAX_RANGE];
