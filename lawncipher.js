@@ -1979,7 +1979,7 @@
 							offendingDocsCount: offendingDocsCount,
 						};
 						if (modelIsValid) checkResults.indexAndUniqueSets = indexAndUniqueSets;
-						cb(undefined, isModelValid, checkResults);
+						cb(undefined, modelIsValid, checkResults);
 					}
 				}
 
