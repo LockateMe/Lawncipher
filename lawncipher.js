@@ -1325,7 +1325,7 @@
 				});
 			}
 
-			function loadAllSearchIndices(cb){
+			function loadAllSearchIndices(cb, treeSettings){
 				if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
 				if (!collectionIndexModel){ //No indexModel -> no search indices
@@ -1361,7 +1361,7 @@
 						}
 
 						loadNext();
-					});
+					}, treeSettings && treeSettings[currentAttribute]);
 				}
 
 				function loadNext(){
@@ -1381,7 +1381,15 @@
 			* @private
 			* @param {String} fieldName of the field to be indexed
 			*/
-			function loadSearchIndex(fieldName, cb, loadData){
+			function loadSearchIndex(fieldName, cb, treeSettings){
+				if (typeof fieldName != 'string') throw new TypeError('fieldName must be a string');
+				if (typeof cb != 'function') throw new TypeError('cb must be a function');
+				if (treeSettings){
+					if (typeof treeSettings != 'object') throw new TypeError('when defined, treeSettings must be an object');
+					if (!(Array.isArray(treeSettings.seed) && treeSettings.seed.length === 256 && checkSeedIntegrity(treeSettings.seed))) throw new TypeError('treeSettings.seed must an array of length 256 that passes checkSeedIntegrity()');
+					if (!(treeSettings.tree instanceof PearsonBPlusTree)) throw new TypeError('treeSettings.tree must be a PearsonBPlusTree instance');
+				}
+
 				//fieldName _index is disallowed, by design (conflicting with the collection's central index)
 				if (fieldName == '_index'){
 					cb();
@@ -1396,7 +1404,7 @@
 				if (!indexesSeeds[fieldName]){
 					//This is a new index, as it doesn't have a seed yet.
 					//Generating one
-					indexesSeeds[fieldName] = PearsonSeedGenerator();
+					indexesSeeds[fieldName] = (treeSettings && treeSettings.seed) || PearsonSeedGenerator();
 					indexesFileFormatVersions[fieldName] = 1;
 					saveMetaIndex(function(err){
 						if (err){
@@ -1404,13 +1412,7 @@
 							return;
 						}
 
-						initIndex(function(err){
-							//TODO: New index. Load key-value pairs into it...
-							//But should it really be done here? If we create more than one index at the same time, we better done one single iteration chain (for all indexes at once), rather than one iteration chain for each new index...
-							console.error('New index : must load key-value pairs into it...');
-
-							cb();
-						});
+						initIndex(cb);
 					});
 				} else {
 					//The index seems to already exist, as it has a seed.
@@ -1437,6 +1439,8 @@
 						indexKeyType: currentIndexType,
 						uniqueIndex: currentIndexUnique,
 					};
+
+					if (treeSettings) currentSearchIndexSettings._preloadedTree = treeSettings.tree;
 
 					var i = new Index(currentSearchIndexSettings, function(loadSearchIndex){
 						if (loadIndexErr){
@@ -1634,6 +1638,10 @@
 					return;
 				}
 
+				// TODO: What does this entail???
+				// What does this imply for existing docs?
+				// What does this imply for future docs?
+				// When doNotApplyModel == true, the indexing is simply skipped...
 				if (doNotApplyModel){
 					saveModel();
 					return;
@@ -1659,20 +1667,25 @@
 				*
 				*/
 
-				console.error('Not yet implemented : apply the new indexModel on existing collection documents')
+				//console.error('Not yet implemented : apply the new indexModel on existing collection documents');
 
-				self.isIndexModelCompatible(indexModel, function(err, isCompatible, offendingDocs){
+				self.isIndexModelCompatible(indexModel, function(err, isCompatible, checkResults){
 					if (err){
 						cb(err);
 						return;
 					}
 
+					if (!isCompatible){
+						cb(undefined, checkResults.offendingDocs);
+						return;
+					}
 
+					saveModel(function(){
+						loadAllSearchIndices(cb, checkResults.indexAndUniqueSets);
+					});
 				});
 
-				saveModel();
-
-				function saveModel(){
+				function saveModel(next){
 					//Save model as part of collection meta
 					collectionIndexModel = indexModel;
 					collectionMeta.indexModel = indexModel;
@@ -1684,7 +1697,15 @@
 
 						//Save model as part of root Lawncipher index
 						collectionDescription.indexModel = clone(collectionIndexModel);
-						saveRootIndex(cb);
+						saveRootIndex(function(err){
+							if (err){
+								cb(err);
+								return;
+							}
+
+							if (next) next();
+							else cb();
+						});
 					});
 				}
 			};

@@ -4,8 +4,9 @@
 - [x] Split the documentation
 - [x] Be sure that indexing is explained properly
 - [ ] indexModel apply on existing docs, "rollback"-able to allow some room for type misfits?
-  - [ ] add a method to make a "dry run" of a indexModel change. The method will iterate and validate each document against the new indexModel. No change will be made on the docs/collection though. But this method can prevent us from having to design a "rollback"-able indexModel change...
+  - [x] add a method to make a "dry run" of a indexModel change. The method will iterate and validate each document against the new indexModel. No change will be made on the docs/collection though. But this method can prevent us from having to design a "rollback"-able indexModel change...
   - [ ] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable
+  - [ ] WHAT DOES "doNotApplyModel" ENTAIL???
 - [ ] Add more "unique" & "index" flags test vectors
 - [ ] Add tests for 0-node tree iteration
 - [x] Reduce the default dateGranularity to 1ms
