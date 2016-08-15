@@ -1992,7 +1992,7 @@
 
 						for (var j = 0; j < indexAndUniqueFields.length; j++){
 							//Check that current field is available in the current document. If not, go to next field for the current document
-							if (!currentDoc[indexAndUniqueFields[j]]) continue;
+							if (typeof currentDoc[indexAndUniqueFields[j]] === 'undefined') continue;
 							//Add the current field's value, as a <fieldValue, docId> pair, for the current document, without triggering IO events. Catch potential collisionning errors
 							try {
 								indexAndUniqueSets[indexAndUniqueFields[j]].tree.add(currentDoc[indexAndUniqueFields[j]], currentDocId, true);
