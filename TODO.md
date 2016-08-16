@@ -9,6 +9,7 @@
   - [ ] WHAT DOES "doNotApplyModel" ENTAIL???
 - [ ] Add more "unique" & "index" flags test vectors
 - [ ] Add tests for 0-node tree iteration
+- [ ] Handle the case where a document's size is bigger than the `_nodeMaxSize` - to split a tree leaf, the conditions to be met are (currentSize >= maxNodeSize && currentRange.width > 0)
 - [x] Reduce the default dateGranularity to 1ms
 - [x] Add `meta.indexVersions`, to store the index file and formats versions
 - [ ] indexes on `index: true` flag in indexModel. will work best string, buffers, boolean(what about largely uneven distribution?) and dates(?)
@@ -24,7 +25,6 @@
   - [x] dates & number index
     - [x] ~~-> get inspired by cryptDB~~
     - [x] string encoding for numbers (and decimals!), that respect order/lexicographical relation. But that won't fix the problem you will have with the Pearson hashing function (loss of order)
-- [ ] `$fuzzy`, `$contain`/`$like`, `$fuzzylike`  matching on strings, for Lawncipher v2.1?
 - [x] use indexes for unique value and id existence checks
 - [ ] use indexes in compound queries, using them to build a data subset when possible (on which the rest of the query will be ran)
 - [ ] Write some more `save` and `bulkSave` examples
@@ -43,3 +43,7 @@
   - [ ] Attackers can read FS, but not app memory
     -> collection names, blob names, and indexed attributes' names must not contain sensitive information
   - [ ] Attackers cannot monitor Lawncipher calls, but can monitor FS activity
+
+## For v2.1
+- [ ] Add an optional "default" value for a given field in IndexModel
+- [ ] `$fuzzy`, `$contain`/`$like`, `$fuzzylike`  matching on strings
