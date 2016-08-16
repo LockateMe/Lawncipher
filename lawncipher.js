@@ -1785,7 +1785,7 @@
 			};
 
 			/**
-			* Check whether a transition to a given index model is possible, given the collection's existing documents
+			* Check whether a transition to a given index model is possible, given the collection's existing documents. Time complexity: O(n)
 			* @param {Object} indexModel - the indexModel to be tested
 			* @param {Function} cb - callback function, that receives (err, isCompatible, offendingDocs, newIndexes, deleteIndexes). `err` is an error, and is defined if one occurred. `isCompatible` is a boolean describing whether the model is compatible with the collection's documents. `offendingDocs` is a Hash<DocId, Hash<FieldName, Reason>>, describing the documents that "made the indexModel not compatible". `newIndexes` is the list of fields that require a new index to be created for them, as opposed to `deleteIndexes` that list the indexes to be deleted
 			*/
@@ -1899,6 +1899,13 @@
 					if (!newFieldFound) indexAdditions.push(newIndexField);
 				}
 
+				//Detecting field removals
+				var removedFields = [];
+				for (var indexField in collectionIndexModel){
+					if (!indexModel[indexModel]) removedFields.push(indexField);
+				}
+
+				//Instanciating the search trees, that will be here used as unicity sets, and that will be used later in a setIndexModel() call
 				var indexAndUniqueSets = {};
 				var indexAndUniqueFields = unionStringArrays(indexAdditions, uniqueFieldsAdditions);
 				for (var i = 0; i < indexAndUniqueFields.length; i++){
@@ -1927,6 +1934,24 @@
 						offendingDocs[docId] = {};
 						offendingDocs[docId][field] = [reason];
 						offendingDocsCount++;
+					}
+				}
+
+				var fieldsToBeRemoved = {};
+				var fieldsToBeRemovedCount = 0;
+
+				function addFieldToBeRemoved(docId, fieldName){
+					if (fieldsToBeRemoved[docId]){
+						fieldsToBeRemoved[docId].push(fieldName);
+					} else {
+						fieldsToBeRemoved[docId] = [fieldName];
+					}
+					fieldsToBeRemovedCount++;
+				}
+
+				function findFieldsToBeRemoved(docId, docIndex){
+					for (var i = 0; i < removedFields.length; i++){
+						if (typeof docIndex[removedFields[i]] != 'undefined') addFieldToBeRemoved(docId, removedFields[i]);
 					}
 				}
 
@@ -1986,6 +2011,9 @@
 							addOffendingReason(currentDocId, typeMismatches[j], 'type_mismatch');
 						}
 
+						//Find the fields to be removed because of the new indexModel
+						findFieldsToBeRemoved(currentDocId, currentDoc);
+
 						/* Verifying field/id unicity
 						* For each added field and for an Id change, check unicity for that field
 						* For each removed field,... well there is nothing to do...
@@ -2026,6 +2054,8 @@
 							offendingDocs: offendingDocs,
 							offendingDocsCount: offendingDocsCount,
 							indexDeletions: indexDeletions,
+							fieldsToBeRemoved: fieldsToBeRemoved,
+							fieldsToBeRemovedCount: fieldsToBeRemovedCount,
 						};
 						if (modelIsValid) checkResults.indexAndUniqueSets = indexAndUniqueSets;
 						cb(undefined, modelIsValid, checkResults);
