@@ -1687,6 +1687,7 @@
 				// What does this imply for existing docs?
 				// What does this imply for future docs?
 				// When doNotApplyModel == true, the indexing is simply skipped...
+				// Potential usage : keep the indexed fields that we are added with the previous model, by that will be removed with the new one...
 				if (doNotApplyModel){
 					saveModel();
 					return;
@@ -1694,7 +1695,7 @@
 
 				//Adapt docs
 				/*
-				*	-Running validateIndexAgainstModel and resave every indexed doc (iterate leaf by leaf)
+				*	-Running validateIndexAgainstModel and resave every indexed doc (iterate leaf by leaf), by removing the fields that have nothing to do with the current model...
 				*	-Recheck unicity and id for every doc? Detect unicity&id differences from previous model
 				*	-Id field change should not be allowed (if one already exists)! Id creation is however allowed.
 				*	-Detect indexing differences with previous indexModel if any, with the following cases to be handled
