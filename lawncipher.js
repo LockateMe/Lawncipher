@@ -1586,7 +1586,7 @@
 			}
 
 			function listExistingSearchIndexes(){
-				return Object.keys(indexesSeeds);
+				return Object.keys(searchIndices);
 			}
 
 			function docToBlobAndIndex(doc){
@@ -2984,7 +2984,48 @@
 				});
 
 				function removeFromIndex(){
-					collectionIndex.remove(id, undefined, cb, doNotSaveIndex); //doNotSaveIndex == noTrigger
+					collectionIndex.remove(id, undefined, function(err){
+						if (err){
+							cb(err);
+							return;
+						}
+
+						//Delete the doc's value from search indices, through an async call chain (that now have become a well-known family member)
+						var searchIndicesList = listExistingSearchIndexes();
+						if (searchIndicesList.length != 0){
+							var searchIndicesListIndex = 0;
+
+							function deleteFromOne(){
+								var currentFieldName = searchIndicesList[searchIndicesListIndex];
+								var currentIndex = searchIndices[currentFieldName];
+
+								if (typeof docToDelete.index[currentFieldName] === 'undefined'){
+									//The document to be removed has no value for the currnet field. Go to next field
+									nextIndex();
+									return;
+								}
+
+								currentIndex.remove(docToDelete.index[currentFieldName], id, function(err){
+									if (err){
+										cb(err);
+										return;
+									}
+
+									nextIndex();
+								}, doNotSaveIndex);
+							}
+
+							function nextIndex(){
+								searchIndicesListIndex++;
+								if (searchIndicesListIndex == searchIndicesList.length) cb();
+								else deleteFromOne();
+							}
+						} else {
+							//Nothing to do. No searches to delete from. Document deletion is complete. Returning
+							cb();
+						}
+
+					}, doNotSaveIndex); //doNotSaveIndex == noTrigger
 				}
 			}
 
@@ -3095,7 +3136,44 @@
 
 				function insertInIndex(){
 					collectionIndex.add(docId, docIndexObj, function(err){
-						cb(err, docId);
+						if (err){
+							cb(err);
+							return;
+						}
+
+						//Insert in searchIndices, through a call chain
+						var searchIndicesList = listExistingSearchIndexes();
+						if (searchIndicesList.length != 0){
+							var searchIndicesListIndex = 0;
+
+							function addToOne(){
+								var currentFieldName = searchIndicesList[searchIndicesListIndex];
+								var currentIndex = searchIndices[currentFieldName];
+
+								if (typeof docIndexObj.index[currentFieldName] === 'undefined'){
+									//The document to be added has no value for the current field. Go to next field
+									nextIndex();
+									return;
+								}
+
+								currentIndex.add(docIndexObj.index[currentFieldName], currentDocId, function(err){
+									if (err){
+										cb(err);
+										return;
+									}
+
+									nextIndex();
+								}, doNotWriteIndex); //Do not replace existing docs for the current field value -> replace == false
+							}
+
+							function nextIndex(){
+								searchIndicesListIndex++;
+								if (searchIndicesListIndex == searchIndicesList.length) cb(undefined, docId);
+								else addToOne();
+							}
+						} else {
+							cb(undefined, docId);
+						}
 					}, doNotWriteIndex, true);
 				}
 			}
