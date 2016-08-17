@@ -5599,7 +5599,7 @@
 				if (isLeaf()){
 					var newDataSize = docSize(value, key);
 					var newNodeSize = currentDataSize + newDataSize;
-					if (newNodeSize >= maxBinWidth){
+					if (newNodeSize >= maxBinWidth && dataRange.width > 0){
 						splitNode(noTrigger);
 						if (hash.lte(middlePoint)){
 							left.addWithHash(hash, key, value, noTrigger, replace);

@@ -9,7 +9,7 @@
   - [ ] WHAT DOES "doNotApplyModel" ENTAIL???
 - [ ] Add more "unique" & "index" flags test vectors
 - [ ] Add tests for 0-node tree iteration
-- [ ] Handle the case where a document's size is bigger than the `_nodeMaxSize` - to split a tree leaf, the conditions to be met are (currentSize >= maxNodeSize && currentRange.width > 0)
+- [x] Handle the case where a document's size is bigger than the `_nodeMaxSize` - to split a tree leaf, the conditions to be met are (currentSize >= maxNodeSize && currentRange.width > 0)
 - [x] Reduce the default dateGranularity to 1ms
 - [x] Add `meta.indexVersions`, to store the index file and formats versions
 - [ ] indexes on `index: true` flag in indexModel. will work best string, buffers, boolean(what about largely uneven distribution?) and dates(?)
