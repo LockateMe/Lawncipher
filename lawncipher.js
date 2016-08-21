@@ -4410,11 +4410,16 @@
 			return bufferBEToLong(theHasher(s, isLookup), isLookup);
 		};
 
-		theTree.on('change', function(dRange, d){
+		theTree.on('change', function(dRange, d, isUnload){
 			//Updated loaded ranges and ranges list
 			dRange = PearsonRange.fromString(dRange);
 			addRangeToFragmentsList(dRange);
-			markUsageOf(dRange);
+
+			//If we are saving changes before unloading the index fragment, we must not count this last save as "usage"
+			//Preventing counting the range in the LRUStringSet
+			if (!isUnload){
+				markUsageOf(dRange);
+			}
 			saveIndexFragment(dRange, d);
 		});
 
@@ -4811,6 +4816,24 @@
 			console.log('Unloading index fragment of range ' + fRangeStr);
 
 			var fRange = PearsonRange.fromString(fRangeStr);
+
+			var pendingEvents = theTree.extractPendingEventsForRange(fRange);
+			if (pendingEvents.length > 0){
+				//Do the crypto and IO writes. Do not actually trigger the event, becuase it will mess up the internal state of the index (with calls to markUsageOf, addRangeToFragmentsList, removeRangeFromFragmentsList)
+				for (var i = 0; i < pendingEvents.length; i++){
+					var currEvent = pendingEvents[i];
+					var currentRange = PearsonRange.fromString(currEvent.rangeStr);
+					if (currEvent._change){
+						triggerEv('change', [currEvent.rangeStr, currEvent.subCollection, true]);
+					} else if (currEvent._delete){
+						triggerEv('delete', [currEvent.rangeStr]);
+					} else {
+						var e = shallowCopy(currEvent);
+						if (e.subCollection) delete e.subCollection;
+						console.error('Unexpected event type for event: ' + JSON.stringify(e));
+					}
+				}
+			}
 
 			var freedSize = markUnloadOf(fRange);
 
@@ -5253,6 +5276,43 @@
 				triggerEv('delete', [deleteList[i]]);
 			}
 			eventsQueue = [];
+		};
+
+		self.extractPendingEventsForRange = function(r){
+			if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
+			if (eventsQueue.length == 0) return [];
+
+			var parsedRanges = {};
+			var pendingEventsSet = {};
+			for (var i = 0; i < eventsQueue.length; i++){
+				var currEvent = eventsQueue[i];
+
+				var currRange = parsedRanges[currEvent.rangeStr];
+				if (!currRange){
+					var newRange = PearsonRange.fromString(currEvent.rangeStr);
+					parsedRanges[currEvent.rangeStr] = newRange;
+					currRange = newRange;
+				}
+
+				//The latest events are at the end of the event queue
+				//Hence, for a given range, the events that need to be taken into account are the ones that are the closest to the end of the event queue
+				//Remove the matched events from the event queue, as they will be "handled" by the methods caller (usually unloadIndexFragment)
+				if (currRange.isRangeContainedIn(r)){
+					eventsQueue.splice(i, 1);
+					i--;
+					pendingEventsSet[currEvent.rangeStr] = currEvent;
+				}
+			}
+
+			var subRangesList = Object.keys(pendingEventsSet);
+			//No events in the queue matched the provided range
+			if (subRangesList.length == 0) return [];
+
+			var extractedFinalEventsList = new Array(subRangesList.length);
+			for (var i = 0; i < subRangesList.length; i++){
+				extractedFinalEventsList[i] = pendingEventsSet[subRangesList[i]];
+			}
+			return extractedFinalEventsList;
 		};
 
 		self.clearEventsQueue = function(){
