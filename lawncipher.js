@@ -3120,7 +3120,7 @@
 					if (!docId){
 						//Generating doc IDs until we get a unique one. Note that if the docId has been provided by the user, it has been checked for unicity earlier
 						function tryId(){
-							docId = to_hex(randomBuffer(8));
+							docId = to_hex(randomBuffer(4));
 							checkIdIsUnique(docId, function(err, isUnique){
 								if (err){
 									_cb(err);
