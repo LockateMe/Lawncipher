@@ -4474,6 +4474,8 @@
 
 					//If no index file is found, well there is only one "range fragment" to be availabe : the full range
 					fragmentsList = [PearsonRange.MAX_RANGE];
+					//And that range is already "loaded" from the disk, since there is currently nothing to be loaded
+					currentLoadedFragmentsRange[PearsonRange.MAX_RANGE.toString()] = PearsonRange.MAX_RANGE;
 					loadCallback();
 				});
 			}

@@ -110,13 +110,21 @@ function basicTests(next, type){
 			var testIndex = new Index(testIndexSettings, function(loadErr){
 				if (loadErr) throw loadErr;
 
-				testIndex.add(k1, v1, function(e){
+				testIndex.map(function(currentDoc, emit){
+					console.error('mapFn call on an empty index!!!');
+					console.error('currentDoc: ' + JSON.stringify(currentDoc));
+					process.exit(1);
+				}, function(e, results){
 					if (e) throw e;
 
-					testIndex.add(k2, v2, function(e){
+					testIndex.add(k1, v1, function(e){
 						if (e) throw e;
 
-						_next();
+						testIndex.add(k2, v2, function(e){
+							if (e) throw e;
+
+							_next();
+						});
 					});
 				});
 			});

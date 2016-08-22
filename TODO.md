@@ -8,7 +8,7 @@
   - [ ] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable
   - [ ] WHAT DOES "doNotApplyModel" ENTAIL???
 - [ ] Add more "unique" & "index" flags test vectors
-- [ ] Add tests for 0-node tree iteration
+- [x] Add tests for 1-node tree iteration
 - [x] Handle the case where a document's size is bigger than the `_nodeMaxSize` - to split a tree leaf, the conditions to be met are (currentSize >= maxNodeSize && currentRange.width > 0)
 - [x] Reduce the default dateGranularity to 1ms
 - [x] Add `meta.indexVersions`, to store the index file and formats versions
