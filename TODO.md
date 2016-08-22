@@ -40,10 +40,10 @@
   - [ ] Re-read how it was done in v1, to see exactly what was measured...
   - [ ] Timed-out writes to meta? Like every 5 seconds (like with TTLs)?
   - [ ] Add a method to update size and doc count counters (that will receive +/- n bytes / +/- n docs as parameters)
-- [ ] Write a threat model
-  - [ ] Attackers can read FS, but not app memory
+- [x] Write a threat model
+  - [x] Attackers can read FS, but not app memory
     -> collection names, blob names, and indexed attributes' names must not contain sensitive information
-  - [ ] Attackers cannot monitor Lawncipher calls, but can monitor FS activity
+  - [x] Attackers cannot monitor Lawncipher calls, but can monitor FS activity
 
 ## For v2.1
 - [ ] Add an optional "default" value for a given field in IndexModel
