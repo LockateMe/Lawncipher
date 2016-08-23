@@ -5,3 +5,4 @@ bower_components/
 tests/test_db/
 tests/*_index/
 tests/test_migration*/
+tests/test_index_model/
