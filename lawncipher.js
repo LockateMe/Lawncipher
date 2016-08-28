@@ -3913,6 +3913,7 @@
 			return c;
 		}
 	}
+	exports.shallowCopy = shallowCopy;
 
 	/*
 	* Deep object equality
