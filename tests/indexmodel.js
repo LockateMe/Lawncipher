@@ -54,6 +54,7 @@ function bufToUI8(b){
 }
 
 function generateIntInRange(r){
+  if (r[0] == r[1]) return r[0];
   return r[0] + Math.round(Math.random() * (r[1] - r[0]));
 }
 
