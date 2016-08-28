@@ -18,6 +18,8 @@ var typesArray = ['string', 'number', 'date', 'boolean', 'buffer', 'object'];
 var indexableTypesArray = ['string', 'number', 'date', 'boolean'];
 //The range of the number of fields in an index model
 var numberOfFieldsRange = [5, 10];
+//The range of the number of conflicting field values in a document
+var numberOfConflictingFieldsRange = [1, 3];
 //The probability that an 'id' field will be set in a model
 var idFieldProbability = .6;
 //The probability that an indexable type is indexed
@@ -121,8 +123,10 @@ function docGeneratorsFactory(indexModel){
   var idValues = {};  //Hash<IdValue, Boolean>
   var idGenerator;
   var uniqueFields = [];
+  var idAndUniqueFields;
   var uniqueValues = {}; //Hash<FieldName, Hash<Value, Boolean>>
   var fieldValuesGenerators = {};
+  var conflictTypes = ['type_mismatch', 'not_unique'];
 
   var modelFields = Object.keys(indexModel);
   for (var i = 0; i < modelFields.length; i++){
@@ -136,6 +140,9 @@ function docGeneratorsFactory(indexModel){
       uniqueValues[modelFields[i]] = {};
     }
   }
+
+  idAndUniqueFields = uniqueFields.slice();
+  if (idField) idAndUniqueFields.splice(0, 0, idField); //Add idField to the start of idAndUniqueFields, it if exists
 
   //Compliant doc generator
   function compliantDoc(){
@@ -167,7 +174,7 @@ function docGeneratorsFactory(indexModel){
     for (var i = 0; i < modelFields.length; i++){
       if (idField && idField == modelFields[i]){
         //Current field is id
-        currentDoc[idField] = currentIdValue;
+        currentDoc[modelFields[i]] = currentIdValue;
       } else if (uniqueFields.indexOf(modelFields[i]) != -1){
         //Current field is unique
         currentDoc[modelFields[i]] = currentUniqueValues[modelFields[i]];
@@ -182,11 +189,75 @@ function docGeneratorsFactory(indexModel){
 
   //Conflicting doc generator
   compliantDoc.conflict = function(){
-    //Unique/Id duplicates
-    //Type mismatches
+    var numberOfConflictingFields = generateIntInRange(numberOfConflictingFieldsRange);
+
+    //Starting building the conflicting doc by getting a compliant one, and then changing field values
+    var conflictingDoc = compliantDoc();
+
+    //When generating a conflictingDoc, we return the generated doc, but also the offending reasons it will raise when calling isIndexModelCompatible
+    var offendingReasons = {};
+
+    //Selecting the names of the fields whose values will become conflicting
+    var namesOfConflictingFields = {};
+    for (var i = 0; i < numberOfConflictingFields; i++){
+      var selectedField;
+      do {
+        selectedField = randomSelectionFromArray(modelFields);
+      } while (namesOfConflictingFields[selectedField]);
+
+      namesOfConflictingFields[selectedField] = true;
+    }
+
+    //Transforming the string-set into an array of string
+    namesOfConflictingFields = Object.keys(namesOfConflictingFields);
+
+    for (var i = 0; i < namesOfConflictingFields.length; i++){
+      var currentConflictField = namesOfConflictingFields[i];
+      var currentConflictFieldCanCauseNotUnique = indexModel[currentConflictField].unique || indexModel[currentConflictField].id;
+      var currentConflictType = randomSelectionFromArray(currentConflictFieldCanCauseNotUnique ? conflictTypes : conflictTypes.slice().splice(conflictTypes.indexOf('not_unique'), 1));
+      if (currentConflictType == 'type_mismatch'){
+        //Type mismatches. Select a type that is different from the current one
+        var indexedFieldType = indexModel[currentConflictField].type;
+        var theOtherTypes = indexableTypesArray.slice();
+        var indexedFieldTypePosition = indexableTypesArray.indexOf(indexedFieldType);
+        if (indexedFieldTypePosition == -1) continue;
+        theOtherTypes.splice(indexedFieldTypePosition, 1);
+
+        var selectedConflictingType = randomSelectionFromArray(theOtherTypes);
+        //Generate a value of the new type and assign it the conflicting doc
+        var conflictingValue = fieldValuesGenerators[selectedConflictingType]();
+        conflictingDoc[currentConflictField] = conflictingValue;
+        //Add it as an offending reason for the doc
+        addOffendingReason(currentConflictField, 'type_mismatch');
+      } else if (currentConflictType == 'not_unique'){
+        //Detect whether the current field is id or just unique
+        var currentFieldValuesList;
+        if (currentConflictField == idField){
+          currentFieldValuesList = Object.keys(idValues);
+        } else {
+          currentFieldValuesList = Object.keys(uniqueValues[currentConflictType]);
+        }
+        //Randomly select an existing value
+        var existingValue = randomSelectionFromArray(currentFieldValuesList);
+        //Set it on the conflictingDoc
+        conflictingDoc[currentConflictField] = existingValue;
+        //Add it as an offending reason for the doc
+        addOffendingReason(currentConflictField, 'not_unique');
+      } else {
+        console.error('Unexpected conflict type: ' + currentConflictType);
+      }
+    }
   };
 
-  return compliantDoc;
+  return {
+    doc: conflictingDoc,
+    offendingReasons: offendingReasons,
+  };
+
+  function addOffendingReason(field, reason){
+    if (offendingReasons[field]) offendingReasons[field].push(reason);
+    else offendingReasons[field] = [reason];
+  }
 }
 
 function stringGenerator(){
