@@ -3902,8 +3902,21 @@
 				} else if (to == 'string' || to == 'boolean' || to == 'number') currentDataType = to;
 				else return currentFieldName; //Is not a valid type. type function is a known case; is there an other?
 
+				var currentTypeCastingFunction = typeCastingFunctions[currentDataType] && typeCastingFunctions[currentDataType][currentFieldDescription.type]
+
 				if (currentFieldDescription.type == currentDataType){
 					validatedData[currentFieldName] = currentFieldData;
+				} else if (currentTypeCastingFunction){
+					//There is a casting function from currentDataType to currentFieldDescription.type
+					var canBeCasted;
+					try {
+						canBeCasted = currentTypeCastingFunction(currentFieldData, true);
+					} catch (e){
+						console.error(e);
+						return currentFieldName;
+					}
+					var castedValue = currentTypeCastingFunction(currentFieldData);
+					validatedData[currentFieldName] = castedValue;
 				} else {
 					return currentFieldName; //Is not THE valid type
 				}
