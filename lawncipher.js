@@ -1663,7 +1663,7 @@
 			/**
 			* Set the indexModel for this collection. To be preferably called right after the collection's creation
 			* @param {Object|Array<String>} indexModel - the document model to be used for this collection.
-			* @param {Function} callback - the callback function, that gets called once the indexModel is saved and applied on all the indexed documents of the collection. Receives (err) if an error occurred
+			* @param {Function} callback - the callback function, that gets called once the indexModel is saved and applied on all the indexed documents of the collection or if an error occurred. Receives (err, offendingDocs), where `err` is an error if one occurred, and `offendingDocs` is the `offendingDocs` property from `isIndexModelCompatible`'s result object
 			* @param {Boolean} [doNotApplyModel] - a boolean indicating whether the indexModel should or not be applied to documents already in the collection
 			*/
 			this.setIndexModel = function(indexModel, cb, doNotApplyModel){
@@ -1785,9 +1785,33 @@
 			};
 
 			/**
+			* @callback indexModelCompatibilityCheckCallback
+			* @param {(Error|String)} [e] - an error, if one occurred
+			* @param {Boolean} isValid - if no error occurred, a boolean describing whether the IndexModel is compatible with the collection's current documents or not
+			* @param {CompatibilityCheckResults} checkResults - an object describing the results of the `isIndexModelCompatible` call, such as the documents offending the new indexModel, the search indexes to be removed, and the fields to be trimmed from existing documents
+			*/
+
+			/**
+			* @typedef {Object} CompatibilityCheckResults
+			* @property {OffendingDocs} offendingDocs
+			* @property {Number} offendingDocsCount - the number of distinct documents offending the indexModel supplied to the `isIndexModelCompatible` call
+			* @property {String[]} indexDeletions - the list of the fields whose search indexes must be removed
+			* @property {FieldsToBeRemoved} fieldsToBeRemoved - an object listing for each document which fields must be removed/trimmed
+			* @property {Number} fieldsToBeRemovedCount - the number of distinct field values that must be trimmed/removed from the collection
+			*/
+
+			/**
+			* @typedef {Object.<DocId, ReasonsOfField>} OffendingDocs
+			*/
+
+			/**
+			* @typedef {Object.<DocId, FieldName} FieldsToBeRemoved
+			*/
+
+			/**
 			* Check whether a transition to a given index model is possible, given the collection's existing documents. Time complexity: O(n)
 			* @param {Object} indexModel - the indexModel to be tested
-			* @param {Function} cb - callback function, that receives (err, isCompatible, offendingDocs, newIndexes, deleteIndexes). `err` is an error, and is defined if one occurred. `isCompatible` is a boolean describing whether the model is compatible with the collection's documents. `offendingDocs` is a Hash<DocId, Hash<FieldName, Reason>>, describing the documents that "made the indexModel not compatible". `newIndexes` is the list of fields that require a new index to be created for them, as opposed to `deleteIndexes` that list the indexes to be deleted
+			* @param {indexModelCompatibilityCheckCallback} cb - callback function, that receives (err, isCompatible, checkResults)
 			*/
 			this.isIndexModelCompatible = function(indexModel, cb){
 				if (typeof indexModel != 'object') throw new TypeError('indexModel must be an object');
@@ -3573,7 +3597,7 @@
 		/**
 		* @private
 		* @callback fieldsGlobalUnicityCallback
-		* @param {(Error|String)} e - an error, if one occured
+		* @param {(Error|String)} [e] - an error, if one occured
 		* @param {Boolean} areUnique - a boolean simply stating if all the unicity checks passed or not
 		* @param {Object.<DocId, ReasonsOfField>} offendingDocs - an object describing the which documents of the collection "offended" the unicity constraints, and for which fields
 		* @param {Object.<FieldName, TreeAndSettings>} resultingTrees - an object containing the search trees (and their seeds and hashers) constructed during the fieldsGlobalUnicity call
