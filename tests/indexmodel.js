@@ -281,7 +281,15 @@ function docGeneratorsFactory(indexModel){
   };
 
   compliantDoc.futureConflict = function(conflictWithIndexModel){
+    var indexValidationResult = Lawncipher.validateIndexModel(conflictWithIndexModel);
+    if (indexValidationResult) throw new Error(indexValidationResult);
 
+    var futureDoc;
+    do {
+      futureDoc = compliantDoc();
+    } while (typeof Lawncipher.validateIndexAgainstModel(futureDoc, conflictWithIndexModel) != 'string');
+
+    return futureDoc;
   };
 }
 
