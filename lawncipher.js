@@ -3793,151 +3793,150 @@
 				cb(err, !err && offendingDocsCount == 0, !err ? offendingDocs : undefined, !err ? unicitySets : undefined);
 			}, undefined, true);
 		}
-
-		function concatBuffers(buffers){
-			if (!Array.isArray(buffers)) return;
-
-			//I do not want to do it recursively, because I guess it would be much heavier memory-wise
-
-			var totalSize = 0;
-			for (var i = 0; i < buffers.length; i++){
-				if (!(buffers[i] instanceof Uint8Array)) return;
-				totalSize += buffers[i].length;
-			}
-			var baseIndex = 0;
-			var b = new Uint8Array(totalSize);
-			for (var i = 0; i < buffers.length; i++){
-				for (var j = 0; j < buffers[i].length; j++){
-					b[baseIndex + j] = buffers[i][j];
-				}
-				baseIndex += buffers[i].length;
-			}
-			return b;
-		}
-
-		/*
-		* Collection index model validation
-		*/
-
-		function isType(t){for (var i = 0; i < permittedIndexTypes.length; i++){if (permittedIndexTypes[i] == t) return true;} return false;}
-		function isIndexable(t){for (var i = 0; i < indexableTypes.length; i++){if (indexableTypes[i] == t) return true;} return false;}
-		function isIdType(t){for (var i = 0; i < idTypes.length; i++){if (idTypes[i] == t) return true;} return false;}
-		function isFieldName(n){return /^[\w\-\.]+$/.test(n);}
-
-		/**
-		* Returns validated model object, or the name of a failing field
-		* Note that this method modifies models where there are fields that are described
-		* by a simple string (e.g : {fieldName: 'fieldType'} is transformed to {fieldName: {type: 'fieldType'}})
-		*
-		*/
-		function validateIndexModel(model){
-			// {name, type, unique, id}
-			var fieldNames = Object.keys(model);
-			var idField;
-			for (var i = 0; i < fieldNames.length; i++){
-				var fieldName = fieldNames[i];
-
-				if (!isFieldName(fieldName)) return 'INVALID_FIELD_NAME_FORMAT:' + fieldName;
-
-				var fieldDescription = model[fieldName];
-
-				if (typeof fieldDescription == 'string'){
-					fieldDescription = {type: fieldDescription};
-				} else if (typeof fieldDescription == 'object' && Object.keys(fieldDescription).length > 0){
-					//Removing unwanted attributes. Keep what we want
-					fieldDescription = {type: fieldDescription.type, id: fieldDescription.id, unique: fieldDescription.unique, index: fieldDescription.index};
-				} else {
-					//Invalid field description
-					return 'INVALID_FIELD_DESCRIPTION:' + fieldName;
-				}
-
-				if (!isType(fieldDescription.type)) return 'INVALID_FIELD_TYPE:' + fieldName + '(' + fieldDescription.type + ')';
-
-				if (fieldDescription.id){
-					if (idField) return 'ID_FIELD_CONFLICT:' + idField + 'vs' + fieldName; //An ID field already exists
-					else {
-						if (!isIdType(fieldDescription.type)) return 'INVALID_ID_TYPE';
-						idField = fieldName;
-					}
-				}
-
-				if (fieldDescription.index && !isIndexable(fieldDescription.type)){
-					return 'FORBIDDEN_INDEX_FLAG:' + fieldName + '(' + fieldDescription.type + ')';
-				}
-
-				//Field description can now be considered as valid. Push it somewhere
-				model[fieldName] = fieldDescription;
-			}
-		}
-
-		/*
-		* Returns either an object containing the validated data, or a string containing the name of the field that failed type validation
-		* NOTE : It doesn't check id and/or field unicity
-		*/
-		function validateIndexAgainstModel(indexData, model){
-			//Assumption : `model` is a valid model
-			if (typeof indexData != 'object') throw new TypeError('indexData must be an object');
-			if (typeof model != 'object') throw new TypeError('model must be an object');
-
-			var validatedData = {};
-
-			var indexDataKeys = Object.keys(indexData);
-			for (var i = 0; i < indexDataKeys.length; i++){
-				if (!model[indexDataKeys[i]]) continue; //Skip fields that aren't in the model
-
-				var currentFieldName = indexDataKeys[i];
-				var currentFieldData = indexData[currentFieldName];
-
-				var currentFieldDescription = model[currentFieldName];
-
-				//If all data types are allowed for this field, then just add the current value to validatedData & continue (process next field, if any)
-				if (currentFieldDescription.type == '*'){
-					validatedData[currentFieldName] = currentFieldData;
-					continue;
-				}
-
-				var currentDataType;
-				var to = typeof currentFieldData;
-
-				if (to == 'object'){
-					if (!currentFieldData){
-						//Field is `null`
-						continue;
-					} else if (Array.isArray(currentFieldData)){
-						currentDataType = 'array'
-					} else if (currentFieldData instanceof Date){
-						currentDataType = 'date'
-					} else {
-						currentDataType = 'object' //Standard object
-					}
-				} else if (to == 'string' || to == 'boolean' || to == 'number') currentDataType = to;
-				else return currentFieldName; //Is not a valid type. type function is a known case; is there an other?
-
-				var currentTypeCastingFunction = typeCastingFunctions[currentDataType] && typeCastingFunctions[currentDataType][currentFieldDescription.type]
-
-				if (currentFieldDescription.type == currentDataType){
-					validatedData[currentFieldName] = currentFieldData;
-				} else if (currentTypeCastingFunction){
-					//There is a casting function from currentDataType to currentFieldDescription.type
-					var canBeCasted;
-					try {
-						canBeCasted = currentTypeCastingFunction(currentFieldData, true);
-					} catch (e){
-						console.error(e);
-						return currentFieldName;
-					}
-					var castedValue = currentTypeCastingFunction(currentFieldData);
-					validatedData[currentFieldName] = castedValue;
-				} else {
-					return currentFieldName; //Is not THE valid type
-				}
-
-			}
-
-			return validatedData;
-		}
-
 	};
+
+	function concatBuffers(buffers){
+		if (!Array.isArray(buffers)) return;
+
+		//I do not want to do it recursively, because I guess it would be much heavier memory-wise
+
+		var totalSize = 0;
+		for (var i = 0; i < buffers.length; i++){
+			if (!(buffers[i] instanceof Uint8Array)) return;
+			totalSize += buffers[i].length;
+		}
+		var baseIndex = 0;
+		var b = new Uint8Array(totalSize);
+		for (var i = 0; i < buffers.length; i++){
+			for (var j = 0; j < buffers[i].length; j++){
+				b[baseIndex + j] = buffers[i][j];
+			}
+			baseIndex += buffers[i].length;
+		}
+		return b;
+	}
+
+	/*
+	* Collection index model validation
+	*/
+
+	function isType(t){for (var i = 0; i < permittedIndexTypes.length; i++){if (permittedIndexTypes[i] == t) return true;} return false;}
+	function isIndexable(t){for (var i = 0; i < indexableTypes.length; i++){if (indexableTypes[i] == t) return true;} return false;}
+	function isIdType(t){for (var i = 0; i < idTypes.length; i++){if (idTypes[i] == t) return true;} return false;}
+	function isFieldName(n){return /^[\w\-\.]+$/.test(n);}
+
+	/**
+	* Returns validated model object, or the name of a failing field
+	* Note that this method modifies models where there are fields that are described
+	* by a simple string (e.g : {fieldName: 'fieldType'} is transformed to {fieldName: {type: 'fieldType'}})
+	*
+	*/
+	function validateIndexModel(model){
+		// {name, type, unique, id}
+		var fieldNames = Object.keys(model);
+		var idField;
+		for (var i = 0; i < fieldNames.length; i++){
+			var fieldName = fieldNames[i];
+
+			if (!isFieldName(fieldName)) return 'INVALID_FIELD_NAME_FORMAT:' + fieldName;
+
+			var fieldDescription = model[fieldName];
+
+			if (typeof fieldDescription == 'string'){
+				fieldDescription = {type: fieldDescription};
+			} else if (typeof fieldDescription == 'object' && Object.keys(fieldDescription).length > 0){
+				//Removing unwanted attributes. Keep what we want
+				fieldDescription = {type: fieldDescription.type, id: fieldDescription.id, unique: fieldDescription.unique, index: fieldDescription.index};
+			} else {
+				//Invalid field description
+				return 'INVALID_FIELD_DESCRIPTION:' + fieldName;
+			}
+
+			if (!isType(fieldDescription.type)) return 'INVALID_FIELD_TYPE:' + fieldName + '(' + fieldDescription.type + ')';
+
+			if (fieldDescription.id){
+				if (idField) return 'ID_FIELD_CONFLICT:' + idField + 'vs' + fieldName; //An ID field already exists
+				else {
+					if (!isIdType(fieldDescription.type)) return 'INVALID_ID_TYPE';
+					idField = fieldName;
+				}
+			}
+
+			if (fieldDescription.index && !isIndexable(fieldDescription.type)){
+				return 'FORBIDDEN_INDEX_FLAG:' + fieldName + '(' + fieldDescription.type + ')';
+			}
+
+			//Field description can now be considered as valid. Push it somewhere
+			model[fieldName] = fieldDescription;
+		}
+	}
+
+	/*
+	* Returns either an object containing the validated data, or a string containing the name of the field that failed type validation
+	* NOTE : It doesn't check id and/or field unicity
+	*/
+	function validateIndexAgainstModel(indexData, model){
+		//Assumption : `model` is a valid model
+		if (typeof indexData != 'object') throw new TypeError('indexData must be an object');
+		if (typeof model != 'object') throw new TypeError('model must be an object');
+
+		var validatedData = {};
+
+		var indexDataKeys = Object.keys(indexData);
+		for (var i = 0; i < indexDataKeys.length; i++){
+			if (!model[indexDataKeys[i]]) continue; //Skip fields that aren't in the model
+
+			var currentFieldName = indexDataKeys[i];
+			var currentFieldData = indexData[currentFieldName];
+
+			var currentFieldDescription = model[currentFieldName];
+
+			//If all data types are allowed for this field, then just add the current value to validatedData & continue (process next field, if any)
+			if (currentFieldDescription.type == '*'){
+				validatedData[currentFieldName] = currentFieldData;
+				continue;
+			}
+
+			var currentDataType;
+			var to = typeof currentFieldData;
+
+			if (to == 'object'){
+				if (!currentFieldData){
+					//Field is `null`
+					continue;
+				} else if (Array.isArray(currentFieldData)){
+					currentDataType = 'array'
+				} else if (currentFieldData instanceof Date){
+					currentDataType = 'date'
+				} else {
+					currentDataType = 'object' //Standard object
+				}
+			} else if (to == 'string' || to == 'boolean' || to == 'number') currentDataType = to;
+			else return currentFieldName; //Is not a valid type. type function is a known case; is there an other?
+
+			var currentTypeCastingFunction = typeCastingFunctions[currentDataType] && typeCastingFunctions[currentDataType][currentFieldDescription.type]
+
+			if (currentFieldDescription.type == currentDataType){
+				validatedData[currentFieldName] = currentFieldData;
+			} else if (currentTypeCastingFunction){
+				//There is a casting function from currentDataType to currentFieldDescription.type
+				var canBeCasted;
+				try {
+					canBeCasted = currentTypeCastingFunction(currentFieldData, true);
+				} catch (e){
+					console.error(e);
+					return currentFieldName;
+				}
+				var castedValue = currentTypeCastingFunction(currentFieldData);
+				validatedData[currentFieldName] = castedValue;
+			} else {
+				return currentFieldName; //Is not THE valid type
+			}
+
+		}
+
+		return validatedData;
+	}
 
 	/**
 	* Join file path parts
