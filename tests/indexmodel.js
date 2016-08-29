@@ -15,7 +15,7 @@ var rmdir = require('rmdir');
 //The types' list, that we have to select from for each field added in an index model
 var typesArray = ['string', 'number', 'date', 'boolean', 'buffer', 'object'];
 //The types that can have their dedicated index
-var indexableTypesArray = ['string', 'number', 'date', 'boolean'];
+var indexableTypesArray = ['string', 'number', 'date', 'boolean', 'buffer'];
 //The range of the number of fields in an index model
 var numberOfFieldsRange = [5, 10];
 //The range of the number of conflicting field values in a document
@@ -38,6 +38,18 @@ var dateRange = [0, 20000];
 var dateTimeRange = [0, 24 * 3600 * 1000];
 //The charset used in the method generateString
 var strCharset = 'aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ0123456789'
+//The range of the number of fields that are modified in an indexModel change
+var migrationModifiedFieldsRange = [0, 2];
+//The range of the number of fields that are added in an indexModel change
+var migrationAddedFieldsRange = [0, 2];
+//The range of the number of fields that are removed in an indexModel change
+var migrationRemovedFieldsRange = [0, 2];
+//The list of possible field modifications
+var migrationFieldModifcations = ['type', 'unique', 'index'];
+//The number of allowed modifications, per modified field
+var migrationFieldModifcationsCount = [1, 2];
+//The range of the number of fields that are "future conflicts" in a doc returned by futureConflict
+var futureConflictFieldsCount = [1, 2];
 
 Lawncipher.init();
 
@@ -66,6 +78,25 @@ function generateString(length){
 
 function generateStringWithinSize(r){
   return generateString(generateIntInRange(r));
+}
+
+function generateUniqueArray(generatorFunction, numElements){
+  var s = {};
+  for (var i = 0; i < numElements; i++){
+    var currentElement;
+    do {
+      currentElement = stringify(generatorFunction());
+    } while (s[currentElement]);
+    s[currentElement] = true;
+  }
+
+  return Object.keys(s);
+}
+
+function generateUniqueArrayFromArray(a, numElements){
+  return generateUniqueArray(function(){
+    return randomSelectionFromArray(a);
+  }, numElements)
 }
 
 function randomSelectionFromArray(a){
@@ -199,18 +230,7 @@ function docGeneratorsFactory(indexModel){
     var offendingReasons = {};
 
     //Selecting the names of the fields whose values will become conflicting
-    var namesOfConflictingFields = {};
-    for (var i = 0; i < numberOfConflictingFields; i++){
-      var selectedField;
-      do {
-        selectedField = randomSelectionFromArray(modelFields);
-      } while (namesOfConflictingFields[selectedField]);
-
-      namesOfConflictingFields[selectedField] = true;
-    }
-
-    //Transforming the string-set into an array of string
-    namesOfConflictingFields = Object.keys(namesOfConflictingFields);
+    var namesOfConflictingFields = generateUniqueArrayFromArray(modelFields, numberOfConflictingFields);
 
     for (var i = 0; i < namesOfConflictingFields.length; i++){
       var currentConflictField = namesOfConflictingFields[i];
@@ -248,17 +268,21 @@ function docGeneratorsFactory(indexModel){
         console.error('Unexpected conflict type: ' + currentConflictType);
       }
     }
+
+    return {
+      doc: conflictingDoc,
+      offendingReasons: offendingReasons,
+    };
+
+    function addOffendingReason(field, reason){
+      if (offendingReasons[field]) offendingReasons[field].push(reason);
+      else offendingReasons[field] = [reason];
+    }
   };
 
-  return {
-    doc: conflictingDoc,
-    offendingReasons: offendingReasons,
-  };
+  compliantDoc.futureConflict = function(conflictWithIndexModel){
 
-  function addOffendingReason(field, reason){
-    if (offendingReasons[field]) offendingReasons[field].push(reason);
-    else offendingReasons[field] = [reason];
-  }
+  };
 }
 
 function stringGenerator(){
@@ -312,7 +336,96 @@ function stringifyValue(v){
 }
 
 function generateNewIndexModelFrom(indexModel){
+  if (typeof indexModel != 'object') throw new TypeError();
+  //Cloning the indexModel, for immutability of the indexModel parameter
+  indexModel = Lawncipher.clone(indexModel);
+  var currentFieldsList = Object.keys(indexModel);
   //Generate an indexModel from an other, for migration testing
+  var modifiedFieldsCount = generateIntInRange(migrationModifiedFieldsRange);
+  var addedFieldsCount = generateIntInRange(migrationAddedFieldsRange);
+  var removedFieldsCount = generateIntInRange(migrationRemovedFieldsRange);
+
+  var idField;
+  for (var i = 0; i < currentFieldsList.length; i++){
+    if (indexModel[currentFieldsList[i]].index){
+      idField = currentFieldsList[i];
+      break;
+    }
+  }
+
+  /*
+  * First remove the fields
+  */
+  var fieldsToBeRemoved = generateUniqueArrayFromArray(currentFieldsList, removedFieldsCount);
+
+  for (var i = 0; i < fieldsToBeRemoved.length; i++){
+    if (idField == fieldsToBeRemoved[i]) idField = null;
+    delete indexModel[fieldsToBeRemoved[i]];
+    currentFieldsList.splice(currentFieldsList.indexOf(fieldsToBeRemoved[i]), 1);
+  }
+  /*
+  * Then modify the fields
+  */
+  var fieldsToBeModified = generateUniqueArrayFromArray(currentFieldsList, modifiedFieldsCount);
+
+  //For each field that will be modified
+  for (var i = 0; i < fieldsToBeModified.length; i++){
+    var currentField = fieldsToBeModified[i];
+    var currentFieldDescription = indexModel[currentField];
+    var numberOfModifications = generateIntInRange(migrationFieldModifcationsCount);
+    //currentModificationTypes contains the types of modifications for that are allowed on the current field, given its current settings.
+    //'index' is removed from currentModificationTypes if the current type of the field is not indexable
+    var currentModificationTypes = (indexableTypesArray.indexOf(currentFieldDescription.type) != -1) ? migrationFieldModifcations : migrationFieldModifcations.slice().splice(migrationFieldModifcations.indexOf('index'), 1);
+
+    var fieldModifications = generateUniqueArrayFromArray(currentModificationTypes, numberOfModifications);
+
+    for (var j = 0; j < fieldModifications.length; j++){
+      if (fieldModifications[j] == 'type'){
+        var otherTypes = typesArray.slice().splice(typesArray.indexOf(currentFieldDescription.type), 1);
+        var newType = randomSelectionFromArray(otherTypes);
+        currentFieldDescription.type = newType;
+      } else if (fieldModifications[j] == 'unique'){
+        currentFieldDescription.unique = typeof currentFieldDescription.unique == 'boolean' ? !currentFieldDescription.unique : booleanGenerator(); //Negate currentFieldDescription.unique if it exists
+      } else if (fieldModifications[j] == 'index'){
+        currentFieldDescription.index = typeof currentFieldDescription.index == 'boolean' ? !currentFieldDescription.index : booleanGenerator();
+      } else throw new Error('Unexpected field modification type: ' + fieldModifications[j]);
+    }
+  }
+  /*
+  * Then add the new fields
+  */
+  //For each field to be added, generate a unique name (that does not already exist in indexModel)
+  var fieldsToBeAdded = {};
+  for (var i = 0; i < addedFieldsCount; i++){
+    var currentFieldName;
+    do {
+      currentFieldName = generateStringWithinSize(fieldNameSizeRange);
+    } while (fieldsToBeAdded[currentFieldName] || indexModel[currentFieldName]);
+    fieldsToBeAdded[currentFieldName] = true;
+  }
+
+  fieldsToBeAdded = Object.keys(fieldsToBeAdded);
+
+  for (var i = 0; i < fieldsToBeAdded.length; i++){
+    //Generate the field's description
+    var currentField = fieldsToBeAdded[i];
+    var currentFieldType = randomSelectionFromArray(typesArray);
+    var currentFieldDescription = {type: currentFieldType};
+    //Check indexable
+    var isIndexable = isInArray(typesArray, currentFieldType);
+    if (isInArray && Math.random() <= indexedProbability){
+      currentFieldDescription.index = true;
+    }
+    //Check unique
+    if (Math.random() < uniqueProbability){
+      currentFieldDescription.unique = true;
+    }
+
+    indexModel[currentField] = currentFieldDescription;
+  }
+
+  //Return the resulting indexModel
+  return indexModel;
 }
 
 //Have 2 different index models (at least)
