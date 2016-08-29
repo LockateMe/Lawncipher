@@ -374,6 +374,8 @@
 		collectionBlobSize: 0 //The summed-up sizes of all collection blobs. Index size not taken into account
 	};
 	var permittedIndexTypes = ['string', 'date', 'number', 'boolean', 'object', 'array', 'buffer', '*'];
+	var indexableTypes = ['string', 'date', 'number', 'boolean', 'buffer'];
+	var idTypes = ['string', 'date', 'number', 'buffer'];
 	var purgeIntervalValue = 5000;
 
 	/*
@@ -3818,6 +3820,8 @@
 		*/
 
 		function isType(t){for (var i = 0; i < permittedIndexTypes.length; i++){if (permittedIndexTypes[i] == t) return true;} return false;}
+		function isIndexable(t){for (var i = 0; i < indexableTypes.length; i++){if (indexableTypes[i] == t) return true;} return false;}
+		function isIdType(t){for (var i = 0; i < idTypes.length; i++){if (idTypes[i] == t) return true;} return false;}
 		function isFieldName(n){return /^[\w\-\.]+$/.test(n);}
 
 		/**
@@ -3841,7 +3845,7 @@
 					fieldDescription = {type: fieldDescription};
 				} else if (typeof fieldDescription == 'object' && Object.keys(fieldDescription).length > 0){
 					//Removing unwanted attributes. Keep what we want
-					fieldDescription = {type: fieldDescription.type, id: fieldDescription.id, unique: fieldDescription.unique};
+					fieldDescription = {type: fieldDescription.type, id: fieldDescription.id, unique: fieldDescription.unique, index: fieldDescription.index};
 				} else {
 					//Invalid field description
 					return 'INVALID_FIELD_DESCRIPTION:' + fieldName;
@@ -3851,7 +3855,14 @@
 
 				if (fieldDescription.id){
 					if (idField) return 'ID_FIELD_CONFLICT:' + idField + 'vs' + fieldName; //An ID field already exists
-					else idField = fieldName;
+					else {
+						if (!isIdType(fieldDescription.type)) return 'INVALID_ID_TYPE';
+						idField = fieldName;
+					}
+				}
+
+				if (fieldDescription.index && !isIndexable(fieldDescription.type)){
+					return 'FORBIDDEN_INDEX_FLAG:' + fieldName + '(' + fieldDescription.type + ')';
 				}
 
 				//Field description can now be considered as valid. Push it somewhere
