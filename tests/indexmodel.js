@@ -49,7 +49,9 @@ var migrationFieldModifcations = ['type', 'unique', 'index'];
 //The number of allowed modifications, per modified field
 var migrationFieldModifcationsCount = [1, 2];
 //The range of the number of fields that are "future conflicts" in a doc returned by futureConflict
-var futureConflictFieldsCount = [1, 2];
+//var futureConflictFieldsCount = [1, 2];
+//Max number of tries in the futureConflict method
+var futureConflictMaxTries = 50;
 
 Lawncipher.init();
 
@@ -284,10 +286,16 @@ function docGeneratorsFactory(indexModel){
     var indexValidationResult = Lawncipher.validateIndexModel(conflictWithIndexModel);
     if (indexValidationResult) throw new Error(indexValidationResult);
 
+    var numTries = 0;
     var futureDoc;
     do {
       futureDoc = compliantDoc();
-    } while (typeof Lawncipher.validateIndexAgainstModel(futureDoc, conflictWithIndexModel) != 'string');
+      numTries++;
+    } while (!(typeof Lawncipher.validateIndexAgainstModel(futureDoc, conflictWithIndexModel) == 'string' || numTries > futureConflictMaxTries));
+
+    if (numTries > futureConflictMaxTries){
+      return;
+    }
 
     return futureDoc;
   };
