@@ -3870,6 +3870,7 @@
 			model[fieldName] = fieldDescription;
 		}
 	}
+	exports.validateIndexModel = validateIndexModel;
 
 	/*
 	* Returns either an object containing the validated data, or a string containing the name of the field that failed type validation
@@ -3937,6 +3938,7 @@
 
 		return validatedData;
 	}
+	exports.validateIndexAgainstModel = validateIndexAgainstModel;
 
 	/**
 	* Join file path parts
