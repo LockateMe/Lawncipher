@@ -8,6 +8,8 @@
   - [ ] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable
   - [ ] WHAT DOES "doNotApplyModel" ENTAIL???
 - [ ] Add more "unique" & "index" flags test vectors
+- [ ] Add automatic type casting, allowing flexibility when saving a document or migrating index models
+- [ ] Add checks for "index" flag in `validateIndexModel`
 - [x] Add tests for 1-node tree iteration
 - [x] Handle the case where a document's size is bigger than the `_nodeMaxSize` - to split a tree leaf, the conditions to be met are (currentSize >= maxNodeSize && currentRange.width > 0)
 - [x] Reduce the default dateGranularity to 1ms
@@ -26,6 +28,7 @@
   - [x] dates & number index
     - [x] ~~-> get inspired by cryptDB~~
     - [x] string encoding for numbers (and decimals!), that respect order/lexicographical relation. But that won't fix the problem you will have with the Pearson hashing function (loss of order)
+    - [ ] Rethink date granularity
 - [x] use indexes for unique value and id existence checks
 - [ ] use indexes in compound queries, using them to build a data subset when possible (on which the rest of the query will be ran)
 - [ ] Write some more `save` and `bulkSave` examples
