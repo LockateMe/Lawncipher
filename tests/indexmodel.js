@@ -85,7 +85,7 @@ function generateUniqueArray(generatorFunction, numElements){
   for (var i = 0; i < numElements; i++){
     var currentElement;
     do {
-      currentElement = stringify(generatorFunction());
+      currentElement = stringifyValue(generatorFunction());
     } while (s[currentElement]);
     s[currentElement] = true;
   }
@@ -330,7 +330,7 @@ function stringifyValue(v){
   if (tv == 'string') return v;
   else if (tv == 'number' || tv == 'boolean') return v.toString();
   else if (v instanceof Date) return v.getTime().toString();
-  else if (v instanceof Uint8Array) return libsodium.to_base64(v);
+  else if (v instanceof Uint8Array) return libsodium.to_string(v);
   else if (tv == 'object') return JSON.stringify(v);
   else throw new TypeError();
 }
