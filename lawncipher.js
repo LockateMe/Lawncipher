@@ -228,6 +228,138 @@
 		return typeof s == 'string' && s.length % 2 == 0 && /^([a-f]|[0-9])+$/ig.test(s);
 	};
 
+	/*
+	* The type casting functions
+	* To cast a value from type1 to type2: typeCastingFunctions['type1']['type2'](value)
+	* To check if a value can be casted from type1 to type2: typeCastingFunctions['type1']['type2'](value, true)
+	*/
+	var typeCastingFunctions = {
+		boolean: {
+			number: function(b, check){
+				if (typeof b != 'boolean') throw new TypeError();
+				if (check) return true;
+				return b == false ? 0 : 1;
+			},
+			string: function(b, check){
+				if (typeof b != 'boolean') throw new TypeError();
+				if (check) return true;
+				return b.toString();
+			},
+		},
+		date: {
+			string: function(d, check){
+				if (!(d instanceof Date)) throw new TypeError();
+				if (check){
+					//A date can always be converted to a string
+					return true;
+				}
+				return d.toISOString();
+			},
+			number: function(d, check){
+				if (!(d instanceof Date)) throw new TypeError();
+				if (check){
+					//A date can always be converted to a number
+					return true;
+				}
+				//Tranforming a date into a number: return the UTC timestamp
+				return d.getTime();
+			},
+		},
+		number: {
+			string: function(n, check){
+				if (typeof n != 'number') throw new TypeError();
+				if (check){
+					//A number can always be converted to a string
+					return true;
+				}
+
+				return n.toString();
+			},
+			date: function(n, check){
+				if (typeof n != 'number') throw new TypeError();
+				var convertible = n == Math.floor(n) && n >= 0;
+				if (check){
+					return convertible;
+				} else if (!convertible){
+					throw new RangeError('Cannot convert ' + n + ' to a date');
+				}
+
+				return new Date(n);
+			},
+			boolean: function(n, check){
+				if (typeof n != 'number') throw new TypeError();
+				if (check) return true;
+
+				return n == 0 ? false : true;
+			},
+		},
+		string: {
+			boolean: function(s, check){
+				if (typeof s != 'string') throw new TypeError();
+
+				s = s.toLowerCase();
+				var canBeParsed = s == 'false' || s == 'f' || s == '0' || s == 'true' || s == 't' || s == '1';
+				if (check){
+					return canBeParsed;
+				} else if (!canBeParsed) throw new RangeError();
+
+				return (s == 'true' || s == 't' || s == '1') ? true : false;
+			},
+			number: function(s, check){
+				if (typeof s != 'string') throw new TypeError();
+				var isIntegerLooking = /^-?(?:0|(?:[1-9]\d*))$/g.test(s);
+				var isFloatLooking = !isIntegerLooking && /^-?(?:0|(:?[1-9]\d*))?\.(?:\d*)$/g.test(s); //Execute the isFloatLooking regex only if isIntegerLooking == false
+				if (check){
+					//The string can be casted to a number if either isFloatLooking or isIntegerLooking are true
+					return isFloatLooking || isIntegerLooking;
+				} else if (!(isFloatLooking || isIntegerLooking)) throw new RangeError('Cannot convert ' + s + ' to number');
+
+				var n;
+				if (isIntegerLooking) n = parseInt(s);
+				else if (isFloatLooking) n = parseFloat(s);
+				else throw new Error('Internal error in string->number casting');
+
+				return n;
+			},
+			date: function(s, check){
+				if (typeof s != 'string') throw new TypeError();
+				var isIntegerLooking = /^-?(?:0|(?:[1-9]\d*))$/g.test(s);
+				var isValidDateString = !isIntegerLooking && !isNaN(Date.parse(s)); //Execute Date.parse only if isIntegerLooking == false
+				if (check){
+					return isIntegerLooking || isValidDateString;
+				} else if (!(isIntegerLooking || isValidDateString)) throw new RangeError('Cannot convert ' + s + ' to date');
+
+				return new Date(isIntegerLooking ? parseInt(s) : s); //Parse the string to integer, if possible. Otherwise just pass the string to the date constructor
+			},
+			buffer: function(s, check){
+				if (typeof s != 'string') throw new TypeError();
+				if (check) return true;
+				return from_string(s);
+			},
+		},
+		buffer: {
+			string: function(b, check){
+				if (!(b instanceof Uint8Array)) throw new TypeError();
+				if (check) return true;
+				return to_string(b);
+			},
+		},
+		object: {
+			string: function(o, check){
+				if (typeof o != 'object') throw new TypeError();
+				if (check) return true;
+				return JSON.stringify(o);
+			},
+		},
+		array: {
+			string: function(a, check){
+				if (!Array.isArray(a)) throw new TypeError();
+				if (check) return true;
+				return JSON.stringify(a);
+			},
+		}
+	};
+
 	var cryptoFileEncoding = {
 		encrypt: scryptFileEncode,
 		decrypt: scryptFileDecode,
