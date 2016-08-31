@@ -49,7 +49,7 @@ var migrationFieldModifcations = ['type', 'unique', 'index'];
 //The number of allowed modifications, per modified field
 var migrationFieldModifcationsCount = [1, 2];
 //The range of the number of fields that are "future conflicts" in a doc returned by futureConflict
-//var futureConflictFieldsCount = [1, 2];
+var futureConflictFieldsCount = [1, 2];
 //Max number of tries in the futureConflict method
 var futureConflictMaxTries = 50;
 
@@ -188,7 +188,7 @@ function docGeneratorsFactory(indexModel){
     if (idField){
       do {
         currentIdValue = idGenerator();
-      } while (idValues[currentIdValue]);
+      } while (idValues[stringifyValue(currentIdValue)]);
       idValues[currentIdValue] = true;
     }
 
@@ -202,7 +202,7 @@ function docGeneratorsFactory(indexModel){
       } while (!uniqueValues[uniqueFields[i]][currentFieldValueStr])
 
       uniqueValues[uniqueFields[i]][currentFieldValueStr] = true;
-      currentUniqueValues[uniqueFields[i]] = currentFieldValueStr;
+      currentUniqueValues[uniqueFields[i]] = currentFieldValue;
      }
 
     for (var i = 0; i < modelFields.length; i++){
@@ -282,9 +282,12 @@ function docGeneratorsFactory(indexModel){
     }
   };
 
+  //This a "more than brute-force" test
   compliantDoc.futureConflict = function(conflictWithIndexModel){
-    var indexValidationResult = Lawncipher.validateIndexModel(conflictWithIndexModel);
-    if (indexValidationResult) throw new Error(indexValidationResult);
+    var indexValidationResult = Lawncipher.validateIndexModel(conflictWithIndexModel, true);
+    if (typeof indexValidationResult != 'object') throw new Error(indexValidationResult);
+
+    var indexModelSummary = indexValidationResult;
 
     var numTries = 0;
     var futureDoc;
@@ -297,7 +300,62 @@ function docGeneratorsFactory(indexModel){
       return;
     }
 
-    return futureDoc;
+    var offendingReasons = {};
+    var newModelFields = Object.keys(conflictWithIndexModel);
+
+    var typeMismatches = [];
+    var currentDoc = futureDoc
+    var validationResult = validateIndexAgainstModel(currentDoc, conflictWithIndexModel);
+    var hadToBeCloned = false;
+    while (typeof validationResult == 'string'){
+      if (typeMismatches.length == 0){
+        currentDoc = Lawncipher.clone(currentDoc);
+        hadToBeCloned = true;
+      }
+      delete currentDoc[validationResult];
+      typeMismatches.push(validationResult);
+
+      validationResult = validationResult(currentDoc, conflictWithIndexModel);
+    }
+
+    if (hadToBeCloned) currentDoc = futureDoc;
+
+    for (var i = 0; i < typeMismatches.length; i++){
+      addOffendingReason(typeMismatches[i], 'type_mismatch');
+    }
+
+    var newIdAndUniqueFields = indexModelSummary.idAndUniqueFields;
+    for (var i = 0; i < newIdAndUniqueFields.length; i++){
+      if (newIdAndUniqueFields[i] == indexModelSummary.id){
+        //Current field is the id field. Check whether this futureDoc has a "not_unique" conflict or not
+        var currentFieldValue = futureDoc[idField];
+        var currentFieldValueStr = stringifyValue(currentFieldValue);
+        if (idValues[currentFieldValueStr]){
+          addOffendingReason(idField, 'not_unique');
+        } else {
+          idValues[currentFieldValueStr] = true;
+        }
+      } else if (newIdAndUniqueFields[i]){
+        //Current field is flagger as "unique". Check whether the value of this current field is a "not_unique" conflict or not
+        var currentFieldValue = futureDoc[newIdAndUniqueFields[i]];
+        var currentFieldValueStr = stringifyValue()
+        if (uniqueValues[newIdAndUniqueFields[i]][currentFieldValueStr]){
+          addOffendingReason(newIdAndUniqueFields[i], 'not_unique');
+        } else {
+          uniqueValues[newIdAndUniqueFields[i]][currentFieldValueStr] = true;
+        }
+      }
+    }
+
+    return {
+      doc: futureDoc,
+      offendingReasons: offendingReasons,
+    };
+
+    function addOffendingReason(field, reason){
+      if (offendingReasons[field]) offendingReasons[field].push(reason);
+      else offendingReasons[field] = [reason];
+    }
   };
 }
 
