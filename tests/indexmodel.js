@@ -12,10 +12,14 @@ var rmdir = require('rmdir');
 /*
 * Some "constants"
 */
+var testPassword = 'password';
+var collectionName = 'test_collection';
 //The types' list, that we have to select from for each field added in an index model
 var typesArray = ['string', 'number', 'date', 'boolean', 'buffer', 'object'];
 //The types that can have their dedicated index
 var indexableTypesArray = ['string', 'number', 'date', 'boolean', 'buffer'];
+//The types that could be used as a DocId
+var idTypesArray = ['string', 'number', 'date', 'buffer'];
 //The range of the number of fields in an index model
 var numberOfFieldsRange = [5, 10];
 //The range of the number of conflicting field values in a document
@@ -52,6 +56,12 @@ var migrationFieldModifcationsCount = [1, 2];
 var futureConflictFieldsCount = [1, 2];
 //Max number of tries in the futureConflict method
 var futureConflictMaxTries = 50;
+//Number of documents in one trial
+var numDocs = 1000;
+//Number of conflicting documents in one trial
+var numConflicts = 50;
+//Number of documents that will become conflicts after a first migration
+var numFutureConflicts = 50;
 
 Lawncipher.init();
 
@@ -109,6 +119,25 @@ function isInArray(array, value){
   return array.indexOf(value) != -1
 }
 
+function checkStringArrayEquality(a1, a2){
+  if (!(Array.isArray(a1) && Array.isArray(a2))) throw new TypeError('both a1 and a2 must be arrays');
+  if (a1.length != a2.length) throw new TypeError('a1 and a2 must have the same length');
+
+  var l = a1.length;
+  for (var i = 0; i < l; i++){
+    var found = false;
+    for (var j = 0; j < l; j++){
+      if (a1[i] == a2[j]){
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+
+  return true;
+}
+
 function generateIndexModel(){
   var numberOfFields = generateIntInRange(numberOfFieldsRange);
 
@@ -136,9 +165,14 @@ function generateIndexModel(){
     var currentModelFields = Object.keys(indexModel);
     var validIdFields = [];
     for (var i = 0; i < currentModelFields.length; i++){
-      if (currentModelFields[i] == 'string' || currentModelFields[i] == 'number'){
+      if (idTypesArray.indexOf(currentModelFields[i]) != -1){
         validIdFields.push(currentModelFields[i]);
       }
+    }
+
+    if (validIdFields.length == 0){
+      //We want to generate an index model with an id field. Cut and restart generation
+      return generateIndexModel();
     }
 
     var selectedIdField;
@@ -199,7 +233,7 @@ function docGeneratorsFactory(indexModel){
       do {
         currentFieldValue = fieldValuesGenerators[uniqueFields[i]]();
         currentFieldValueStr = stringifyValue(currentFieldValue);
-      } while (!uniqueValues[uniqueFields[i]][currentFieldValueStr])
+      } while (uniqueValues[uniqueFields[i]][currentFieldValueStr])
 
       uniqueValues[uniqueFields[i]][currentFieldValueStr] = true;
       currentUniqueValues[uniqueFields[i]] = currentFieldValue;
@@ -258,8 +292,9 @@ function docGeneratorsFactory(indexModel){
         if (currentConflictField == idField){
           currentFieldValuesList = Object.keys(idValues);
         } else {
-          currentFieldValuesList = Object.keys(uniqueValues[currentConflictType]);
+          currentFieldValuesList = (uniqueValues[currentConflictField] && Object.keys(uniqueValues[currentConflictField])) || [];
         }
+        if (currentFieldValuesList.length == 0) continue;
         //Randomly select an existing value
         var existingValue = randomSelectionFromArray(currentFieldValuesList);
         //Set it on the conflictingDoc
@@ -305,7 +340,7 @@ function docGeneratorsFactory(indexModel){
 
     var typeMismatches = [];
     var currentDoc = futureDoc
-    var validationResult = validateIndexAgainstModel(currentDoc, conflictWithIndexModel);
+    var validationResult = Lawncipher.validateIndexAgainstModel(currentDoc, conflictWithIndexModel);
     var hadToBeCloned = false;
     while (typeof validationResult == 'string'){
       if (typeMismatches.length == 0){
@@ -315,7 +350,7 @@ function docGeneratorsFactory(indexModel){
       delete currentDoc[validationResult];
       typeMismatches.push(validationResult);
 
-      validationResult = validationResult(currentDoc, conflictWithIndexModel);
+      validationResult = Lawncipher.validateIndexAgainstModel(currentDoc, conflictWithIndexModel);
     }
 
     if (hadToBeCloned) currentDoc = futureDoc;
@@ -357,6 +392,25 @@ function docGeneratorsFactory(indexModel){
       else offendingReasons[field] = [reason];
     }
   };
+
+  compliantDoc.removeFromIndex = function(doc){
+    //For the given doc, remove from idValues and uniqueValues
+    if (idField && typeof doc[idField] != 'undefined'){
+      delete idValues[doc[idField]];
+    }
+
+    for (var i = 0; i < uniqueFields.length; i++){
+      if (typeof doc[uniqueFields[i]]) continue;
+
+      var currentUniqueFieldValue = doc[uniqueFields[i]];
+      var currentUniqueFieldValueStr = stringifyValue(currentUniqueFieldValue);
+      if (uniqueValues[uniqueFields[i]][currentUniqueFieldValueStr]){
+        delete uniqueValues[uniqueFields[i]][currentUniqueFieldValueStr]
+      }
+    }
+  };
+
+  return compliantDoc;
 }
 
 function stringGenerator(){
@@ -501,6 +555,161 @@ function generateNewIndexModelFrom(indexModel){
   //Return the resulting indexModel
   return indexModel;
 }
+
+function initTests(cb){
+  if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+  console.log('Initializing DB with test password');
+  db.openWithPassword(testPassword, function(err){
+    if (err) throw err;
+
+    cb();
+  });
+}
+
+function oneTest(cb){
+  if (cb && typeof cb != 'function') throw new TypeError('when defined, cb must be a function');
+
+  console.log('oneTest call');
+  console.log('Generating an index model');
+  var initialModel = generateIndexModel();
+
+  console.log('Instanciating the docGenerator');
+  var docGenerator = docGeneratorsFactory(initialModel);
+
+  var docsIDs, futureConflictsIDs;
+
+  console.log('Generating the test (complying) documents');
+  var docs = new Array(numDocs);
+  for (var i = 0; i < numDocs; i++){
+    docs[i] = docGenerator();
+  }
+
+  console.log('Generating the conflicting documents');
+  var conflicts = new Array(numConflicts);
+  for (var i = 0; i < numConflicts; i++){
+    conflicts[i] = docGenerator.conflict();
+  }
+
+  console.log('Generating the indexModel we are going to migrate to');
+  var futureModel = generateNewIndexModelFrom(initialModel);
+  console.log('Generating future conflicts (i.e, docs that are valid with the currnet model, but that will be invalid once we change IndexModels)');
+  var futureConflicts = new Array(numFutureConflicts);
+  for (var i = 0; i < numFutureConflicts; i++){
+    futureConflicts[i] = docGenerator.futureConflict(futureModel);
+  }
+
+  console.log('Instanciating the collection with the index model');
+  db.collection(collectionName, function(err, col){
+    if (err) throw err;
+
+    console.log('Inserting the complying documents');
+    col.bulkSave(docs, function(err, _docIDs){
+      if (err) throw err;
+
+      docIDs = _docIDs;
+
+      console.log('Running the conflicting insertions');
+      doConflicts(col, function(){
+        console.log('Running the future conflicts test (doc insertion followed by failing IndexModel migration)');
+        doFutureConflicts(col, function(){
+          if (cb) cb();
+        });
+      });
+    });
+  }, initialModel);
+
+  function doConflicts(col, next){
+    if (!col) throw new Error('col must be defined');
+    if (next && typeof next != 'function') throw new TypeError('when defined, next must be a function');
+
+    var conflictIndex = 0;
+
+    function oneConflict(){
+      var currentConflict = conflicts[conflictIndex];
+      col.save(currentConflict.doc, function(err){
+        if (!err) throw new Error('The conflicting document ' + JSON.stringify(currentConflict.doc) + ' has been saved');
+
+        console.log('Error thrown by conflicting document ' + conflictIndex + ' : ' + err);
+
+        nextConflict();
+      });
+    }
+
+    function nextConflict(){
+      conflictIndex++;
+      if (conflictIndex == conflicts.length){
+        if (next) next();
+      } else {
+        oneConflict();
+      }
+    }
+
+    oneConflict();
+  }
+
+  function doFutureConflicts(col, next){
+    if (!col) throw new Error('col must be defined');
+    if (next && typeof next != 'function') throw new TypeError('when defined, next must be a function');
+
+    //Mass doc insertion
+    col.bulkSave(futureConflicts, function(err, _futureConflictsIDs){
+      if (err) throw err;
+
+      futureConflictsIDs = _futureConflictsIDs;
+
+      col.setIndexModel(futureModel, function(err, offendingDocs){
+        if (err) throw err;
+
+        //Check that the offending docs are as expected
+        if (!offendingDocs) throw new Error('No offending docs were found in "doFutureConflicts" on setIndexModel');
+
+        var offendingDocsCount = Object.keys(offendingDocs);
+        assert(offendingDocsCount == futureConflicts.length, 'Unexpected offendingDocs count for future conflicts: ' + offendingDocsCount);
+
+        for (var i = 0; i < futureConflicts.length; i++){
+          var currentDocId = futureConflictsIDs[i];
+          var expectedOffendingReasons = futureConflicts[i].offendingReasons;
+          var actualOffendingReasons = offendingDocs[currentDocId];
+
+          var expectedOffendingReasonsFieldsList = Object.keys(expectedOffendingReasons);
+          var actualOffendingReasonsFieldsList = Object.keys(actualOffendingReasons);
+
+          assert(checkStringArrayEquality(expectedOffendingReasonsFieldsList, actualOffendingReasonsFieldsList), 'Expected and actual offending fields list differ for document ' + i);
+          for (var j = 0; j < expectedOffendingReasonsFieldsList.length; j++){
+            assert(
+              !checkStringArrayEquality(expectedOffendingReasons[expectedOffendingReasonsFieldsList[j]], actualOffendingReasons[expectedOffendingReasons[j]]),
+              'Expected and actual offending reasons for field ' + expectedOffendingReasonsFieldsList[j] + ' for doc ' + i + ' differ. (actual: ' + JSON.stringify(actualOffendingReasons[expectedOffendingReasonsFieldsList[i]]) + ', expected: ' + JSON.stringify(expectedOffendingReasons[expectedOffendingReasonsFieldsList[i]]) + ')'
+            );
+          }
+        }
+      });
+    });
+
+    var futureConflictIndex = 0;
+  }
+}
+
+function runTests(){
+  initTests(function(){
+    oneTest(function(){
+      console.log('oneTest completed');
+    });
+  });
+}
+
+fs.access(dbPath, function(err){
+  if (err){
+    //Folder do not exist, most probably -> runTests
+    runTests();
+  } else {
+    rmdir(dbPath, function(err){
+      if (err) throw err;
+
+      runTests();
+    });
+  }
+});
 
 //Have 2 different index models (at least)
 //Generate docs that can go with both models
