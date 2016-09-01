@@ -825,7 +825,7 @@
 			//Loading collections. Or more precisely checking their description format. But why?
 			function loadCollections(){
 				if (rootIndex.length == 0){
-					console.log('No collection description to load');
+					//console.log('No collection description to load');
 					callback();
 					return;
 				}
@@ -1795,9 +1795,15 @@
 			};
 
 			/**
+			* @callback setIndexModelCallback
+			* @param {Error} [err] - an error, if one occurred
+			* @param {OffendingDocs} [offendingDocs] - an object describing the objects that are offending the new index model. Undefined if the indexModel migration was completed and no conflicts were encountered
+			*/
+
+			/**
 			* Set the indexModel for this collection. To be preferably called right after the collection's creation
 			* @param {Object|Array<String>} indexModel - the document model to be used for this collection.
-			* @param {Function} callback - the callback function, that gets called once the indexModel is saved and applied on all the indexed documents of the collection or if an error occurred. Receives (err, offendingDocs), where `err` is an error if one occurred, and `offendingDocs` is the `offendingDocs` property from `isIndexModelCompatible`'s result object
+			* @param {setIndexModelCallback} callback - the callback function, that gets called once the indexModel is saved and applied on all the indexed documents of the collection or if an error occurred. Receives (err, offendingDocs), where `err` is an error if one occurred, and `offendingDocs` is the `offendingDocs` property from `isIndexModelCompatible`'s result object
 			* @param {Boolean} [doNotApplyModel] - a boolean indicating whether the indexModel should or not be applied to documents already in the collection
 			*/
 			this.setIndexModel = function(indexModel, cb, doNotApplyModel){
@@ -3831,10 +3837,13 @@
 	* by a simple string (e.g : {fieldName: 'fieldType'} is transformed to {fieldName: {type: 'fieldType'}})
 	*
 	*/
-	function validateIndexModel(model){
+	function validateIndexModel(model, returnSummary){
 		// {name, type, unique, id}
 		var fieldNames = Object.keys(model);
 		var idField;
+		var uniqueFields = [];
+		var idAndUniqueFields;
+
 		for (var i = 0; i < fieldNames.length; i++){
 			var fieldName = fieldNames[i];
 
@@ -3866,8 +3875,29 @@
 				return 'FORBIDDEN_INDEX_FLAG:' + fieldName + '(' + fieldDescription.type + ')';
 			}
 
+			if (fieldDescription.unique){
+				uniqueFields.push(fieldName);
+			}
+
 			//Field description can now be considered as valid. Push it somewhere
 			model[fieldName] = fieldDescription;
+		}
+
+		if (returnSummary){
+			idAndUniqueFields = uniqueFields.slice();
+			if (idField){
+				if (model[idField].unique){
+					//idAndUniqueFields already contains id. We must remove it from its current position, and put it as the first element of idAndUniqueFields
+					idAndUniqueFields.splice(idAndUniqueFields.indexOf(idField), 1);
+				}
+				idAndUniqueFields.splice(0, 0, idField);
+			}
+
+			return {
+				id: idField,
+				uniqueFields: uniqueFields,
+				idAndUniqueFields: idAndUniqueFields,
+			};
 		}
 	}
 	exports.validateIndexModel = validateIndexModel;
