@@ -220,6 +220,7 @@ function docGeneratorsFactory(indexModel){
 
     //Generating compliant doc Id
     if (idField){
+      console.log('Generating idValue');
       do {
         currentIdValue = idGenerator();
       } while (idValues[stringifyValue(currentIdValue)]);
@@ -227,18 +228,20 @@ function docGeneratorsFactory(indexModel){
     }
 
     //Generating compliant unique values
+    console.log('Generating the values of "unique" fields');
     for (var i = 0; i < uniqueFields.length; i++){
       var currentFieldValue;
       var currentFieldValueStr;
       do {
         currentFieldValue = fieldValuesGenerators[uniqueFields[i]]();
         currentFieldValueStr = stringifyValue(currentFieldValue);
-      } while (uniqueValues[uniqueFields[i]][currentFieldValueStr])
+      } while (uniqueValues[uniqueFields[i]][currentFieldValueStr]);
 
       uniqueValues[uniqueFields[i]][currentFieldValueStr] = true;
       currentUniqueValues[uniqueFields[i]] = currentFieldValue;
-     }
+    }
 
+    console.log('Generating the values for the remaining fields');
     for (var i = 0; i < modelFields.length; i++){
       if (idField && idField == modelFields[i]){
         //Current field is id
@@ -281,8 +284,9 @@ function docGeneratorsFactory(indexModel){
         theOtherTypes.splice(indexedFieldTypePosition, 1);
 
         var selectedConflictingType = randomSelectionFromArray(theOtherTypes);
+        console.log('selectedConflictingType: ' + selectedConflictingType);
         //Generate a value of the new type and assign it the conflicting doc
-        var conflictingValue = fieldValuesGenerators[selectedConflictingType]();
+        var conflictingValue = getGeneratorFor(selectedConflictingType)();
         conflictingDoc[currentConflictField] = conflictingValue;
         //Add it as an offending reason for the doc
         addOffendingReason(currentConflictField, 'type_mismatch');
@@ -458,7 +462,7 @@ function stringifyValue(v){
   if (tv == 'string') return v;
   else if (tv == 'number' || tv == 'boolean') return v.toString();
   else if (v instanceof Date) return v.getTime().toString();
-  else if (v instanceof Uint8Array) return libsodium.to_string(v);
+  else if (v instanceof Uint8Array) return libsodium.to_base64(v);
   else if (tv == 'object') return JSON.stringify(v);
   else throw new TypeError();
 }
@@ -573,6 +577,7 @@ function oneTest(cb){
   console.log('oneTest call');
   console.log('Generating an index model');
   var initialModel = generateIndexModel();
+  console.log('Generated index model:\n' + JSON.stringify(initialModel, undefined, '\t'));
 
   console.log('Instanciating the docGenerator');
   var docGenerator = docGeneratorsFactory(initialModel);
@@ -588,11 +593,13 @@ function oneTest(cb){
   console.log('Generating the conflicting documents');
   var conflicts = new Array(numConflicts);
   for (var i = 0; i < numConflicts; i++){
+    console.log(i);
     conflicts[i] = docGenerator.conflict();
   }
 
   console.log('Generating the indexModel we are going to migrate to');
   var futureModel = generateNewIndexModelFrom(initialModel);
+  console.log('Index model we will migrate to: ' + JSON.stringify(futureModel, undefined, '\t'));
   console.log('Generating future conflicts (i.e, docs that are valid with the currnet model, but that will be invalid once we change IndexModels)');
   var futureConflicts = new Array(numFutureConflicts);
   for (var i = 0; i < numFutureConflicts; i++){
