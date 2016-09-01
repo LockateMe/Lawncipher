@@ -375,7 +375,7 @@
 	};
 	var permittedIndexTypes = ['string', 'date', 'number', 'boolean', 'object', 'array', 'buffer', '*'];
 	var indexableTypes = ['string', 'date', 'number', 'boolean', 'buffer'];
-	var idTypes = ['string', 'date', 'number', 'buffer'];
+	var idAndUniqueTypes = ['string', 'date', 'number', 'buffer'];
 	var purgeIntervalValue = 5000;
 
 	/*
@@ -3828,7 +3828,7 @@
 
 	function isType(t){for (var i = 0; i < permittedIndexTypes.length; i++){if (permittedIndexTypes[i] == t) return true;} return false;}
 	function isIndexable(t){for (var i = 0; i < indexableTypes.length; i++){if (indexableTypes[i] == t) return true;} return false;}
-	function isIdType(t){for (var i = 0; i < idTypes.length; i++){if (idTypes[i] == t) return true;} return false;}
+	function isIdOrUniqueType(t){for (var i = 0; i < idAndUniqueTypes.length; i++){if (idAndUniqueTypes[i] == t) return true;} return false;}
 	function isFieldName(n){return /^[\w\-\.]+$/.test(n);}
 
 	/**
@@ -3866,7 +3866,7 @@
 			if (fieldDescription.id){
 				if (idField) return 'ID_FIELD_CONFLICT:' + idField + 'vs' + fieldName; //An ID field already exists
 				else {
-					if (!isIdType(fieldDescription.type)) return 'INVALID_ID_TYPE';
+					if (!isIdOrUniqueType(fieldDescription.type)) return 'INVALID_ID_TYPE';
 					idField = fieldName;
 				}
 			}
@@ -3876,6 +3876,7 @@
 			}
 
 			if (fieldDescription.unique){
+				if (!isIdOrUniqueType(fieldDescription.type)) return 'FORBIDDEN_UNIQUE_FLAG:' + fieldName + '(' + fieldDescription.type + ')';
 				uniqueFields.push(fieldName);
 			}
 
