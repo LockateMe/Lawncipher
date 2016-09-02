@@ -1579,7 +1579,7 @@
 
 					if (treeSettings) currentSearchIndexSettings._preloadedTree = treeSettings.tree;
 
-					var i = new Index(currentSearchIndexSettings, function(loadSearchIndex){
+					var i = new Index(currentSearchIndexSettings, function(loadIndexErr){
 						if (loadIndexErr){
 							next(loadIndexErr);
 							return;
@@ -1970,6 +1970,7 @@
 				}
 
 				//Detect the fields that are already unique and the one that determines documents' IDs
+				//console.log('Detecting unique/id fields in current index model');
 				var currentIdField;
 				var currentUniqueFields;
 				var currentSearchIndexFields;
@@ -1989,6 +1990,7 @@
 				}
 
 				//Detect the field that will need to become unique or that will determine the document IDs
+				//console.log('Detecting the new unique/id fields');
 				var idField;
 				var uniqueFields = [];
 				var searchIndexFields = [];
@@ -2004,6 +2006,7 @@
 				var uniqueFieldsDeletions = [];
 
 				//Detecting unicity deletion
+				//console.log('Detecting unicity deletion');
 				for (var i = 0; currentUniqueFields && i < currentUniqueFields.length; i++){
 					var currentUniqueField = currentUniqueFields[i];
 					var currentFieldFound = false;
@@ -2018,6 +2021,7 @@
 				}
 
 				//Detecting unicity addition
+				//console.log('Detecting unicity addition');
 				for (var i = 0; i < uniqueFields.length; i++){
 					var newUniqueField = uniqueFields[i];
 					var newFieldFound = false;
@@ -2036,6 +2040,7 @@
 				var indexDeletions = [];
 
 				//Detecting index flag deletion
+				//console.log('Detecting index flag addition');
 				for (var i = 0; currentSearchIndexFields && i < currentSearchIndexFields.length; i++){
 					var currentIndexField = currentSearchIndexFields[i];
 					var currentFieldFound = false;
@@ -2050,7 +2055,8 @@
 				}
 
 				//Detecting index flag addition
-				for (var i = 0; searchIndexFields.length; i++){
+				//console.log('Detecting index flag deletion');
+				for (var i = 0; i < searchIndexFields.length; i++){
 					var newIndexField = searchIndexFields[i];
 					var newFieldFound = false;
 					for (var j = 0; currentSearchIndexFields && j < currentSearchIndexFields.length; j++){
@@ -2064,12 +2070,14 @@
 				}
 
 				//Detecting field removals
+				//console.log('Detecting field removals');
 				var removedFields = [];
 				for (var indexField in collectionIndexModel){
 					if (!indexModel[indexModel]) removedFields.push(indexField);
 				}
 
 				//Instanciating the search trees, that will be here used as unicity sets, and that will be used later in a setIndexModel() call
+				//console.log('Instanciating the search trees');
 				var indexAndUniqueSets = {};
 				var indexAndUniqueFields = unionStringArrays(indexAdditions, uniqueFieldsAdditions);
 				for (var i = 0; i < indexAndUniqueFields.length; i++){
@@ -2120,6 +2128,7 @@
 				}
 
 				function processNode(){
+					//console.log('processNode call');
 					//Note: when retrieving with forQuery == false (like here), there is no immutability on the retrieved currentSubCollection
 					//i.e : if you modify a doc in currentSubCollection, you have altered the index's memory, and the change could be saved
 					var currentSubCollection = currentNode.getBinnedRange().subCollection;
@@ -2494,7 +2503,7 @@
 							return;
 						}
 						for (var i = 0; i < ttl.length; i++){
-							if (!(typeof ttl[i] == 'number' || ttl[i] instanceof Date)){
+							if (ttl[i] && !(typeof ttl[i] == 'number' || ttl[i] instanceof Date)){
 								cb(new TypeError('ttl[' + i  + '] is not a valid TTL value'));
 								return;
 							}
@@ -3884,22 +3893,23 @@
 			model[fieldName] = fieldDescription;
 		}
 
-		if (returnSummary){
-			idAndUniqueFields = uniqueFields.slice();
-			if (idField){
-				if (model[idField].unique){
-					//idAndUniqueFields already contains id. We must remove it from its current position, and put it as the first element of idAndUniqueFields
-					idAndUniqueFields.splice(idAndUniqueFields.indexOf(idField), 1);
-				}
-				idAndUniqueFields.splice(0, 0, idField);
+		idAndUniqueFields = uniqueFields.slice();
+		if (idField){
+			if (model[idField].unique){
+				//idAndUniqueFields already contains id. We must remove it from its current position, and put it as the first element of idAndUniqueFields
+				idAndUniqueFields.splice(idAndUniqueFields.indexOf(idField), 1);
 			}
-
-			return {
-				id: idField,
-				uniqueFields: uniqueFields,
-				idAndUniqueFields: idAndUniqueFields,
-			};
+			idAndUniqueFields.splice(0, 0, idField);
 		}
+
+		var modelSummary = {
+			id: idField,
+			uniqueFields: uniqueFields,
+			idAndUniqueFields: idAndUniqueFields,
+		};
+		if (!model.$summary) Object.defineProperty(model, '$summary', {value: modelSummary});
+
+		if (returnSummary) return modelSummary;
 	}
 	exports.validateIndexModel = validateIndexModel;
 

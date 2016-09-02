@@ -19,7 +19,7 @@ var typesArray = ['string', 'number', 'date', 'boolean', 'buffer', 'object'];
 //The types that can have their dedicated index
 var indexableTypesArray = ['string', 'number', 'date', 'boolean', 'buffer'];
 //The types that could be used as a DocId
-var idTypesArray = ['string', 'number', 'date', 'buffer'];
+var idAndUniqueTypesArray = ['string', 'number', 'date', 'buffer'];
 //The range of the number of fields in an index model
 var numberOfFieldsRange = [5, 10];
 //The range of the number of conflicting field values in a document
@@ -151,8 +151,8 @@ function generateIndexModel(){
     if (isIndexable && Math.random() <= indexedProbability){
       currentFieldDescription.index = true;
     }
-    //Check unique
-    if (Math.random() < uniqueProbability){
+    //Check unique, if the type is compatible
+    if (idAndUniqueTypesArray.indexOf(currentFieldType) != -1 && Math.random() < uniqueProbability){
       currentFieldDescription.unique = true;
     }
 
@@ -165,7 +165,7 @@ function generateIndexModel(){
     var currentModelFields = Object.keys(indexModel);
     var validIdFields = [];
     for (var i = 0; i < currentModelFields.length; i++){
-      if (idTypesArray.indexOf(currentModelFields[i]) != -1){
+      if (idAndUniqueTypesArray.indexOf(currentModelFields[i]) != -1){
         validIdFields.push(currentModelFields[i]);
       }
     }
@@ -183,7 +183,7 @@ function generateIndexModel(){
     indexModel[selectedIdField].id = true;
   }
 
-  return indexModel;
+  return typeof Lawncipher.validateIndexModel(indexModel) != 'string' ? indexModel : generateIndexModel();
 }
 
 function docGeneratorsFactory(indexModel){
@@ -220,7 +220,7 @@ function docGeneratorsFactory(indexModel){
 
     //Generating compliant doc Id
     if (idField){
-      console.log('Generating idValue');
+      //console.log('Generating idValue');
       do {
         currentIdValue = idGenerator();
       } while (idValues[stringifyValue(currentIdValue)]);
@@ -228,7 +228,7 @@ function docGeneratorsFactory(indexModel){
     }
 
     //Generating compliant unique values
-    console.log('Generating the values of "unique" fields');
+    //console.log('Generating the values of "unique" fields');
     for (var i = 0; i < uniqueFields.length; i++){
       var currentFieldValue;
       var currentFieldValueStr;
@@ -241,7 +241,7 @@ function docGeneratorsFactory(indexModel){
       currentUniqueValues[uniqueFields[i]] = currentFieldValue;
     }
 
-    console.log('Generating the values for the remaining fields');
+    //console.log('Generating the values for the remaining fields');
     for (var i = 0; i < modelFields.length; i++){
       if (idField && idField == modelFields[i]){
         //Current field is id
@@ -284,7 +284,7 @@ function docGeneratorsFactory(indexModel){
         theOtherTypes.splice(indexedFieldTypePosition, 1);
 
         var selectedConflictingType = randomSelectionFromArray(theOtherTypes);
-        console.log('selectedConflictingType: ' + selectedConflictingType);
+        //console.log('selectedConflictingType: ' + selectedConflictingType);
         //Generate a value of the new type and assign it the conflicting doc
         var conflictingValue = getGeneratorFor(selectedConflictingType)();
         conflictingDoc[currentConflictField] = conflictingValue;
@@ -377,8 +377,8 @@ function docGeneratorsFactory(indexModel){
       } else if (newIdAndUniqueFields[i]){
         //Current field is flagger as "unique". Check whether the value of this current field is a "not_unique" conflict or not
         var currentFieldValue = futureDoc[newIdAndUniqueFields[i]];
-        var currentFieldValueStr = stringifyValue()
-        if (uniqueValues[newIdAndUniqueFields[i]][currentFieldValueStr]){
+        var currentFieldValueStr = stringifyValue(currentFieldValue);
+        if (uniqueValues[newIdAndUniqueFields[i]] && [newIdAndUniqueFields[i]][currentFieldValueStr]){
           addOffendingReason(newIdAndUniqueFields[i], 'not_unique');
         } else {
           uniqueValues[newIdAndUniqueFields[i]][currentFieldValueStr] = true;
@@ -467,10 +467,10 @@ function stringifyValue(v){
   else throw new TypeError();
 }
 
-function generateNewIndexModelFrom(indexModel){
-  if (typeof indexModel != 'object') throw new TypeError();
+function generateNewIndexModelFrom(_indexModel){
+  if (typeof _indexModel != 'object') throw new TypeError();
   //Cloning the indexModel, for immutability of the indexModel parameter
-  indexModel = Lawncipher.clone(indexModel);
+  var indexModel = Lawncipher.clone(_indexModel);
   var currentFieldsList = Object.keys(indexModel);
   //Generate an indexModel from an other, for migration testing
   var modifiedFieldsCount = generateIntInRange(migrationModifiedFieldsRange);
@@ -517,8 +517,10 @@ function generateNewIndexModelFrom(indexModel){
         var newType = randomSelectionFromArray(otherTypes);
         currentFieldDescription.type = newType;
       } else if (fieldModifications[j] == 'unique'){
+        //check idAndUniqueTypesArray here
         currentFieldDescription.unique = typeof currentFieldDescription.unique == 'boolean' ? !currentFieldDescription.unique : booleanGenerator(); //Negate currentFieldDescription.unique if it exists
       } else if (fieldModifications[j] == 'index'){
+        //check idAndUniqueTypesArray here
         currentFieldDescription.index = typeof currentFieldDescription.index == 'boolean' ? !currentFieldDescription.index : booleanGenerator();
       } else throw new Error('Unexpected field modification type: ' + fieldModifications[j]);
     }
@@ -557,7 +559,7 @@ function generateNewIndexModelFrom(indexModel){
   }
 
   //Return the resulting indexModel
-  return indexModel;
+  return typeof Lawncipher.validateIndexModel(indexModel) != 'string' ? indexModel : generateNewIndexModelFrom(_indexModel);
 }
 
 function initTests(cb){
@@ -593,14 +595,13 @@ function oneTest(cb){
   console.log('Generating the conflicting documents');
   var conflicts = new Array(numConflicts);
   for (var i = 0; i < numConflicts; i++){
-    console.log(i);
     conflicts[i] = docGenerator.conflict();
   }
 
   console.log('Generating the indexModel we are going to migrate to');
   var futureModel = generateNewIndexModelFrom(initialModel);
   console.log('Index model we will migrate to: ' + JSON.stringify(futureModel, undefined, '\t'));
-  console.log('Generating future conflicts (i.e, docs that are valid with the currnet model, but that will be invalid once we change IndexModels)');
+  console.log('Generating future conflicts (i.e, docs that are valid with the current model, but that will be invalid once we change IndexModels)');
   var futureConflicts = new Array(numFutureConflicts);
   for (var i = 0; i < numFutureConflicts; i++){
     futureConflicts[i] = docGenerator.futureConflict(futureModel);
