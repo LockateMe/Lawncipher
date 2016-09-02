@@ -2521,7 +2521,8 @@
 				function saveOne(){
 					self.__save(blobs ? blobs[_saveIndex] : undefined, indices ? indices[_saveIndex] : undefined, function(err, docId){
 						if (err){
-							cb(err);
+							if (typeof err == 'string') cb('[' + _saveIndex + '] ' + err);
+							else cb(err);
 							return;
 						}
 						docIDs.push(docId);
@@ -3947,9 +3948,11 @@
 					//Field is `null`
 					continue;
 				} else if (Array.isArray(currentFieldData)){
-					currentDataType = 'array'
+					currentDataType = 'array';
 				} else if (currentFieldData instanceof Date){
-					currentDataType = 'date'
+					currentDataType = 'date';
+				} else if (currentFieldData instanceof Uint8Array){
+					currentDataType = 'buffer';
 				} else {
 					currentDataType = 'object' //Standard object
 				}
@@ -3957,6 +3960,10 @@
 			else return currentFieldName; //Is not a valid type. type function is a known case; is there an other?
 
 			var currentTypeCastingFunction = typeCastingFunctions[currentDataType] && typeCastingFunctions[currentDataType][currentFieldDescription.type]
+			/*console.log(currentDataType);
+			if (currentTypeCastingFunction){
+				console.log('Found casting function for ' + currentDataType + ' -> ' + currentFieldDescription.type);
+			}*/
 
 			if (currentFieldDescription.type == currentDataType){
 				validatedData[currentFieldName] = currentFieldData;
@@ -4089,7 +4096,11 @@
 	function clone(o){
 		var typeO = typeof o;
 		if (typeO == 'object'){
-			if (Array.isArray(o)){
+			if (o instanceof Uint8Array){
+				var c = new Uint8Array(o.length);
+				for (var i = 0; i < o.length; i++) c[i] = o[i];
+				return c;
+			} else if (Array.isArray(o)){
 				var c = [];
 				for (var i = 0; i < o.length; i++) c.push(clone(o[i]));
 				return c;
