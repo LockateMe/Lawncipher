@@ -3740,7 +3740,7 @@
 					});
 				} else {
 					function mapUnicitiyCheckFn(doc, emit){
-						if (doc.index[fieldName] == value) emit(doc.id);
+						if (deepObjectEquality(doc.index[fieldName], value)) emit(doc.id);
 					}
 
 					collectionIndex.map(mapUnicitiyCheckFn, function(err, matchedDocs){
@@ -4183,6 +4183,13 @@
 				if (o1.length != o2.length) return false;
 				for (var i = 0; i < o1.length; i++){
 					if (!deepObjectEquality(o1[i], o2[i])) return false;
+				}
+				return true;
+			} else if (o1 instanceof Uint8Array || o2 instanceof Uint8Array){
+				if (xor(o1 instanceof Uint8Array, o2 instanceof Uint8Array)) return false;
+				if (o1.length != o2.length) return false;
+				for (var i = 0; i < o1.length; i++){
+					if (o1[i] != o2[i]) return false;
 				}
 				return true;
 			} else if (o1 instanceof Date || o2 instanceof Date){
