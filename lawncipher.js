@@ -4201,7 +4201,19 @@
 			var o2Keys = Object.keys(o2);
 			if (o1Keys.length != o2Keys.length) return false;
 
-			var commonPropertiesNames = 0;
+			var o1KeysFoundIno2 = 0;
+			var o2KeysFoundIno1 = 0;
+
+			for (var i = 0; i < o1Keys.length; i++){
+				if (typeof o2[o1Keys[i]] != 'undefined') o1KeysFoundIno2++;
+			}
+			for (var i = 0; i < o2Keys.length; i++){
+				if (typeof o1[o2Keys[i]] != 'undefined') o2KeysFoundIno1++;
+			}
+
+			if (o1KeysFoundIno2 != o2KeysFoundIno1) return false;
+
+			/*var commonPropertiesNames = 0;
 			for (var i = 0; i < o1Keys.length; i++){
 				for (var j = 0; j < o2Keys.length; j++){
 					if (o1Keys[i] == o2Keys[j]){
@@ -4211,7 +4223,7 @@
 				}
 			}
 
-			if (commonPropertiesNames < o1Keys.length) return false;
+			if (commonPropertiesNames < o1Keys.length) return false;*/
 
 			for (var i = 0; i < o1Keys.length; i++){
 				if (!deepObjectEquality(o1[o1Keys[i]], o2[o1Keys[i]])) return false;
