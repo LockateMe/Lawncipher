@@ -2397,7 +2397,7 @@
 							var fieldIndex = 0;
 
 							function checkOneField(){
-								checkFieldIsUnique(uniqueFields[fieldIndex], indexData[fieldIndex], function(err, isUnique){
+								checkFieldIsUnique(uniqueFields[fieldIndex], indexData[uniqueFields[fieldIndex]], function(err, isUnique){
 									if (err){
 										cb(err);
 										return;
@@ -2519,6 +2519,7 @@
 				var _saveIndex = 0;
 				var isLast = false;
 				function saveOne(){
+					console.log('_saveIndex:' + _saveIndex);
 					self.__save(blobs ? blobs[_saveIndex] : undefined, indices ? indices[_saveIndex] : undefined, function(err, docId){
 						if (err){
 							if (typeof err == 'string') cb('[' + _saveIndex + '] ' + err);
@@ -2651,7 +2652,7 @@
 									var fieldUnicityIndex = 0;
 
 									function checkOneField(){
-										checkFieldIsUnique(uniqueFields[fieldUnicityIndex], newIndexData[fieldUnicityIndex], function(err, isUnique){
+										checkFieldIsUnique(uniqueFields[fieldUnicityIndex], newIndexData[uniqueFields[fieldUnicityIndex]], function(err, isUnique){
 											if (err){
 												next(err);
 												return;
@@ -3714,7 +3715,28 @@
 							return;
 						}
 
-						cb(undefined, matchingDocIds.length <= (postInsert ? 1 : 0));
+						var isFieldValueUnique;
+						if (matchingDocIds && Array.isArray(matchingDocIds)){
+							//The search index returned an array.
+							//The field is unique depending on the number of elements it contains and the postInsert parameter
+							//If postInsert is defined, it means that we want to know whether a supposedly already inserted value is unique across the collection (by presenting a maximum count of 1)
+							//If postInsert is not defined, it means that we want to know whether this collection already contains the this field value or not
+							isFieldValueUnique = matchingDocIds.length <= (postInsert ? 1 : 0);
+						} else {
+							//The search index did not return an array
+							//To know whether a value is already inserted in the array, we must check whether matchingDocIds is not undefined
+							if (typeof matchingDocIds == 'undefined'){
+								//No existing value found -> the value is/would be unique across the collection (regardless of postInsert)
+								isFieldValueUnique = true;
+							} else {
+								//An already inserted value exists. Which means, with postInsert defined, the given field value is present in the collection
+								if (postInsert) isFieldValueUnique = true;
+								//An already inserted value exists. Hence, the value that we want to insert cannot be inserted, because otherwise it would be "not unique"
+								else isFieldValueUnique = false;
+							}
+						}
+
+						cb(undefined, isFieldValueUnique);
 					});
 				} else {
 					function mapUnicitiyCheckFn(doc, emit){
