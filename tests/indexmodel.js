@@ -108,7 +108,7 @@ function generateUniqueArray(generatorFunction, numElements){
 function generateUniqueArrayFromArray(a, numElements){
   return generateUniqueArray(function(){
     return randomSelectionFromArray(a);
-  }, numElements)
+  }, Math.min(numElements, a.length));
 }
 
 function randomSelectionFromArray(a){
@@ -381,6 +381,7 @@ function docGeneratorsFactory(indexModel){
         if (uniqueValues[newIdAndUniqueFields[i]] && [newIdAndUniqueFields[i]][currentFieldValueStr]){
           addOffendingReason(newIdAndUniqueFields[i], 'not_unique');
         } else {
+          if (!uniqueValues[newIdAndUniqueFields[i]]) uniqueValues[newIdAndUniqueFields[i]] = {};
           uniqueValues[newIdAndUniqueFields[i]][currentFieldValueStr] = true;
         }
       }
@@ -488,6 +489,7 @@ function generateNewIndexModelFrom(_indexModel){
   /*
   * First remove the fields
   */
+  console.log('Choosing the fields to be removed')
   var fieldsToBeRemoved = generateUniqueArrayFromArray(currentFieldsList, removedFieldsCount);
 
   for (var i = 0; i < fieldsToBeRemoved.length; i++){
@@ -498,20 +500,24 @@ function generateNewIndexModelFrom(_indexModel){
   /*
   * Then modify the fields
   */
+  console.log('Choosing the fields to be modified');
   var fieldsToBeModified = generateUniqueArrayFromArray(currentFieldsList, modifiedFieldsCount);
 
   //For each field that will be modified
   for (var i = 0; i < fieldsToBeModified.length; i++){
     var currentField = fieldsToBeModified[i];
+    console.log('Current field to be modified: ' + currentField);
     var currentFieldDescription = indexModel[currentField];
     var numberOfModifications = generateIntInRange(migrationFieldModifcationsCount);
     //currentModificationTypes contains the types of modifications for that are allowed on the current field, given its current settings.
     //'index' is removed from currentModificationTypes if the current type of the field is not indexable
     var currentModificationTypes = (indexableTypesArray.indexOf(currentFieldDescription.type) != -1) ? migrationFieldModifcations : migrationFieldModifcations.slice().splice(migrationFieldModifcations.indexOf('index'), 1);
-
+    console.log('Choosing field modifications');
     var fieldModifications = generateUniqueArrayFromArray(currentModificationTypes, numberOfModifications);
+    console.log('Field modifications have been chosen');
 
     for (var j = 0; j < fieldModifications.length; j++){
+      console.log('Current field modification: ' + fieldModifications[i]);
       if (fieldModifications[j] == 'type'){
         var otherTypes = typesArray.slice().splice(typesArray.indexOf(currentFieldDescription.type), 1);
         var newType = randomSelectionFromArray(otherTypes);
@@ -529,6 +535,7 @@ function generateNewIndexModelFrom(_indexModel){
   * Then add the new fields
   */
   //For each field to be added, generate a unique name (that does not already exist in indexModel)
+  console.log('Choosing the fields to be added');
   var fieldsToBeAdded = {};
   for (var i = 0; i < addedFieldsCount; i++){
     var currentFieldName;
@@ -559,7 +566,14 @@ function generateNewIndexModelFrom(_indexModel){
   }
 
   //Return the resulting indexModel
-  return typeof Lawncipher.validateIndexModel(indexModel) != 'string' ? indexModel : generateNewIndexModelFrom(_indexModel);
+  if (typeof Lawncipher.validateIndexModel(indexModel) != 'string'){
+    console.log('The model is valid; returning');
+    return indexModel;
+  } else {
+    console.log('The model is not valid, generating a new one');
+    return generateNewIndexModelFrom(_indexModel);
+  }
+  //return typeof Lawncipher.validateIndexModel(indexModel) != 'string' ? indexModel : generateNewIndexModelFrom(_indexModel);
 }
 
 function initTests(cb){
@@ -613,7 +627,20 @@ function oneTest(cb){
 
     console.log('Inserting the complying documents');
     col.bulkSave(docs, function(err, _docIDs){
-      if (err) throw err;
+      if (err){
+        if (typeof err == 'string'){
+          var errDocIndexMatch = /^\[(\d+)\]/.exec(err);
+          var errDocIndex = errDocIndexMatch[1];
+          if (errDocIndex){
+            errDocIndex = parseInt(errDocIndex);
+            if (!isNaN(errDocIndex)){
+              var errDoc = docs[errDocIndex];
+              console.error('Doc causing the error:\n' + JSON.stringify(errDoc, undefined, '\t'));
+            }
+          }
+        }
+        throw err;
+      }
 
       docIDs = _docIDs;
 
