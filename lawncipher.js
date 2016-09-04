@@ -5944,7 +5944,8 @@
 					hash = bufferBEToLong(hash);
 				}
 
-				if (key instanceof Date) key = hasher.dateToNumber(key);
+				key = stringifyValue(key);
+				//if (key instanceof Date) key = hasher.dateToNumber(key);
 
 				if (isLeaf()){
 					var newDataSize = docSize(value, key);
@@ -6003,7 +6004,8 @@
 					hash = bufferBEToLong(hash);
 				}
 
-				if (key instanceof Date) key = hasher.dateToNumber(key);
+				key = stringifyValue(key);
+				//if (key instanceof Date) key = hasher.dateToNumber(key);
 
 				if (isLeaf()){
 					if (typeof subCollection[key] == 'undefined' || subCollection[key] == null) return;
@@ -6046,7 +6048,8 @@
 			* @param {Long} hash
 			*/
 			thisNode.lookup = function(key, hash){
-				if (key instanceof Date) key = hasher.dateToNumber(key);
+				key = stringifyValue(key);
+				//if (key instanceof Date) key = hasher.dateToNumber(key);
 
 				if (this.isLeaf()){
 					return subCollection[key] && clone(subCollection[key]);
@@ -6230,6 +6233,7 @@
 						rightSubCollection[subCollectionList[i]] = subCollection[subCollectionList[i]];
 					} else {
 						console.error('Error in hash distribution');
+						console.error('subCollectionList: ' + JSON.stringify(subCollectionList));
 					}
 				}
 				leftNode.setSubCollection(leftSubCollection);
@@ -6271,6 +6275,16 @@
 			var p = new Uint8Array(prefixLength);
 			for (var i = 0; i < p.length; i++) p[i] = a[i];
 			return p;
+		}
+
+		function stringifyValue(v){
+		  var tv = typeof v;
+		  if (tv == 'string') return v;
+		  else if (tv == 'number' || tv == 'boolean') return v.toString();
+		  else if (v instanceof Date) return v.getTime().toString();
+		  else if (v instanceof Uint8Array) return to_base64(v);
+		  else if (tv == 'object') return JSON.stringify(v);
+		  else throw new TypeError();
 		}
 	}
 
