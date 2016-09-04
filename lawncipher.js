@@ -4002,6 +4002,9 @@
 					console.error(e);
 					return currentFieldName;
 				}
+				if (!canBeCasted){
+					return currentFieldName;
+				}
 				var castedValue = currentTypeCastingFunction(currentFieldData);
 				validatedData[currentFieldName] = castedValue;
 			} else {
@@ -4865,12 +4868,14 @@
 					else if (thisIterator.hasNext()){
 						currentRange = findRangeOfHash(currentRange.end.add(1));
 					} else {
+						console.log('NEXT() CANNOT FIND NEXT NODE');
 						cb();
 						return;
 					}
 
 					if (currentLoadedFragmentsRange[currentRange.toString()]){
 						//The next range is already loaded in memory
+						console.log('lookupRange');
 						var currentNode = theTree.lookupRange(currentRange);
 						cb(null, currentNode);
 					} else {
@@ -4879,7 +4884,7 @@
 								cb(err);
 								return;
 							}
-
+							console.log('loadIndexFragment callback');
 							cb(null, receiverNode);
 						}, true); //mustFind == true
 					}
