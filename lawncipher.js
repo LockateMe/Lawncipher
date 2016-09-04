@@ -2339,16 +2339,9 @@
 						//Using the validated data as indexData
 						//Meaning that, when you use a model, docs that have extra-model attributes will have them removed in the db
 						indexData = validationResult;
-						var indexFields = Object.keys(collectionIndexModel);
-						var idField = null, uniqueFields = [];
-						for (var i = 0; i < indexFields.length; i++){
-							if (collectionIndexModel[indexFields[i]].id){
-								if (!idField) idField = indexFields[i];
-							}
-							if (collectionIndexModel[indexFields[i]].unique){
-								uniqueFields.push(indexFields[i]);
-							}
-						}
+						var idField = collectionIndexModel.$summary.id;
+						var uniqueFields = collectionIndexModel.$summary.uniqueFields;
+
 						//Check for ID and value unicity, according to the model
 						if (idField){
 							docId = indexData[idField];
@@ -2388,8 +2381,8 @@
 								}
 							});
 						} else {
-							//If there are `unique` fields or marked as `id`, then check for unicity before saving the doc
-							if ((docId && uniqueId) || uniqueFields.length > 0) checkFieldsUnicity();
+							//If there are `unique` fields, then check for new values' unicity before saving the doc
+							if (uniqueFields.length > 0) checkFieldsUnicity();
 							else save(); //Otherwise, save the doc now
 						}
 
@@ -2397,13 +2390,20 @@
 							var fieldIndex = 0;
 
 							function checkOneField(){
+								if (typeof indexData[uniqueFields[fieldIndex]] == 'undefined'){
+									//The current "unique" field does not have a value in the current document. Skipping the unicity check
+									nextField();
+									return;
+								}
+
 								checkFieldIsUnique(uniqueFields[fieldIndex], indexData[uniqueFields[fieldIndex]], function(err, isUnique){
 									if (err){
+										console.log('err');
 										cb(err);
 										return;
 									}
 									if (!isUnique){
-										cb('DUPLICATE_UNIQUE_VALUE');
+										cb('DUPLICATE_UNIQUE_VALUE:' + uniqueFields[fieldIndex]);
 										return;
 									}
 									nextField();
@@ -2519,8 +2519,9 @@
 				var _saveIndex = 0;
 				var isLast = false;
 				function saveOne(){
-					console.log('_saveIndex:' + _saveIndex);
+					//console.log('_saveIndex:' + _saveIndex);
 					self.__save(blobs ? blobs[_saveIndex] : undefined, indices ? indices[_saveIndex] : undefined, function(err, docId){
+						//console.log('__Save callback');
 						if (err){
 							if (typeof err == 'string') cb('[' + _saveIndex + '] ' + err);
 							else cb(err);
@@ -2631,16 +2632,8 @@
 									newIndexData = validatedIndexData;
 
 									//Extracted supposed id and unique fields
-									var indexFields = Object.keys(collectionIndexModel);
-									var idField = null, uniqueFields = [];
-									for (var i = 0; i < indexFields.length; i++){
-										if (collectionIndexModel[indexFields[i]].id){
-											if (!idField) idField = indexFields[i];
-										}
-										if (collectionIndexModel[indexFields[i]].unique){
-											uniqueFields.push(indexFields[i]);
-										}
-									}
+									var idField = collectionIndexModel.$summary.id;
+									var uniqueFields = collectionIndexModel.$summary.uniqueFields;
 
 									//Check that the id didn't change with the new data
 									if (idField && newIndexData[idField] != indexData[idField]){
@@ -3311,6 +3304,7 @@
 					} else afterIdValidation();
 
 					function afterIdValidation(){
+						//console.log('afterIdValidation');
 						var ttlData;
 						if (ttl){
 							if (ttl < Date.now()) ttlData = ttl + Date.now();
@@ -3362,7 +3356,7 @@
 									return;
 								}
 
-								currentIndex.add(docIndexObj.index[currentFieldName], currentDocId, function(err){
+								currentIndex.add(docIndexObj.index[currentFieldName], docId, function(err){
 									if (err){
 										cb(err);
 										return;
@@ -3377,6 +3371,9 @@
 								if (searchIndicesListIndex == searchIndicesList.length) cb(undefined, docId);
 								else addToOne();
 							}
+
+							//Starting the search index insertion call chain
+							addToOne();
 						} else {
 							cb(undefined, docId);
 						}
@@ -3706,23 +3703,28 @@
 			*/
 			function checkFieldIsUnique(fieldName, value, cb, postInsert){
 				if (!cb) throw new TypeError('Missing callback');
+				if (typeof value == 'undefined' || value == null) throw new TypeError('Missing field value');
 
 				//If there is an index for that field, check existence of value in index
 				if (searchIndices[fieldName]){
+					//console.log('Search index lookup');
 					searchIndices[fieldName].lookup(value, function(err, matchingDocIds){
 						if (err){
 							cb(err);
 							return;
 						}
+						//console.log('Lookup complete');
 
 						var isFieldValueUnique;
 						if (matchingDocIds && Array.isArray(matchingDocIds)){
+							//console.log('Array returned');
 							//The search index returned an array.
 							//The field is unique depending on the number of elements it contains and the postInsert parameter
 							//If postInsert is defined, it means that we want to know whether a supposedly already inserted value is unique across the collection (by presenting a maximum count of 1)
 							//If postInsert is not defined, it means that we want to know whether this collection already contains the this field value or not
 							isFieldValueUnique = matchingDocIds.length <= (postInsert ? 1 : 0);
 						} else {
+							//console.log('Array not returned');
 							//The search index did not return an array
 							//To know whether a value is already inserted in the array, we must check whether matchingDocIds is not undefined
 							if (typeof matchingDocIds == 'undefined'){
@@ -3739,7 +3741,9 @@
 						cb(undefined, isFieldValueUnique);
 					});
 				} else {
+					//console.log('Collection index map operation');
 					function mapUnicitiyCheckFn(doc, emit){
+						//console.log('mapFn');
 						if (deepObjectEquality(doc.index[fieldName], value)) emit(doc.id);
 					}
 
@@ -4954,6 +4958,7 @@
 			var limitReached = false;
 
 			function processNode(){
+				//console.log('map:processNode');
 				/*
 				* Get the data contained in the current tree node.
 				* forQuery indicates whether the the node data should be copied (when forQuery == false) and shouldn't (when forQuery == true)
@@ -4969,6 +4974,7 @@
 					nextNode();
 				} else {
 					var keysList = Object.keys(currentSubCollection);
+					//console.log('keysList:\n' + JSON.stringify(keysList))
 					if (keysList.length == 0){
 						nextNode();
 						return;
@@ -4990,6 +4996,7 @@
 				if (treeTraveler.hasNext() && !limitReached){
 					treeTraveler.next(function(err, _n){
 						if (err){
+							treeTraveler = null;
 							cb(err);
 							return;
 						}
@@ -4998,6 +5005,7 @@
 						processNode();
 					});
 				} else {
+					treeTraveler = null;
 					cb(undefined, resultSet);
 				}
 			}
