@@ -268,28 +268,46 @@ function docGeneratorsFactory(indexModel){
     //When generating a conflictingDoc, we return the generated doc, but also the offending reasons it will raise when calling isIndexModelCompatible
     var offendingReasons = {};
 
+    //console.log('Choosing the names of the fields that will be conflicting');
     //Selecting the names of the fields whose values will become conflicting
     var namesOfConflictingFields = generateUniqueArrayFromArray(modelFields, numberOfConflictingFields);
+    //console.log('namesOfConflictingFields: ' + JSON.stringify(namesOfConflictingFields));
 
     for (var i = 0; i < namesOfConflictingFields.length; i++){
       var currentConflictField = namesOfConflictingFields[i];
       var currentConflictFieldCanCauseNotUnique = indexModel[currentConflictField].unique || indexModel[currentConflictField].id;
       var currentConflictType = randomSelectionFromArray(currentConflictFieldCanCauseNotUnique ? conflictTypes : conflictTypes.slice().splice(conflictTypes.indexOf('not_unique'), 1));
+      //console.log('---------------------');
+      //console.log('currentConflictField: ' + currentConflictField);
+      //console.log('currentConflictType: ' + currentConflictType);
       if (currentConflictType == 'type_mismatch'){
         //Type mismatches. Select a type that is different from the current one
         var indexedFieldType = indexModel[currentConflictField].type;
+        //console.log('indexedFieldType: ' + indexedFieldType);
         var theOtherTypes = indexableTypesArray.slice();
         var indexedFieldTypePosition = indexableTypesArray.indexOf(indexedFieldType);
         if (indexedFieldTypePosition == -1) continue;
         theOtherTypes.splice(indexedFieldTypePosition, 1);
+        //console.log('theOtherTypes: ' + JSON.stringify(theOtherTypes));
 
-        var selectedConflictingType = randomSelectionFromArray(theOtherTypes);
+        var selectedConflictingType;
+        var selectedConflictingTypeTrials = 0;
+        var hasCastingMethod;
+        do {
+          selectedConflictingType = randomSelectionFromArray(theOtherTypes);
+          selectedConflictingTypeTrials++;
+          //(Check whether we can convert selectedConflictingType to indexedFieldType)
+          hasCastingMethod = Lawncipher.isCastable(selectedConflictingType, indexedFieldType);
+        } while (hasCastingMethod && selectedConflictingTypeTrials <= 5);
+
         //console.log('selectedConflictingType: ' + selectedConflictingType);
         //Generate a value of the new type and assign it the conflicting doc
         var conflictingValue = getGeneratorFor(selectedConflictingType)();
         conflictingDoc[currentConflictField] = conflictingValue;
-        //Add it as an offending reason for the doc
-        addOffendingReason(currentConflictField, 'type_mismatch');
+        //Add it as an offending reason for the doc, if the new field value is not castable
+        if (!hasCastingMethod){
+          addOffendingReason(currentConflictField, 'type_mismatch');
+        }
       } else if (currentConflictType == 'not_unique'){
         //Detect whether the current field is id or just unique
         var currentFieldValuesList;
@@ -329,19 +347,21 @@ function docGeneratorsFactory(indexModel){
     var indexModelSummary = indexValidationResult;
 
     var numTries = 0;
-    var futureDoc;
-    do {
+    var futureDoc = compliantDoc();
+    /*do {
       futureDoc = compliantDoc();
       numTries++;
     } while (!(typeof Lawncipher.validateIndexAgainstModel(futureDoc, conflictWithIndexModel) == 'string' || numTries > futureConflictMaxTries));
 
     if (numTries > futureConflictMaxTries){
-      return;
-    }
+      console.log('Retry');
+      return compliantDoc.futureConflict(conflictWithIndexModel);
+    }*/
 
     var offendingReasons = {};
     var newModelFields = Object.keys(conflictWithIndexModel);
 
+    console.log('Trying to validate the randomly generated & unmodified futureDoc');
     var typeMismatches = [];
     var currentDoc = futureDoc
     var validationResult = Lawncipher.validateIndexAgainstModel(currentDoc, conflictWithIndexModel);
@@ -356,6 +376,8 @@ function docGeneratorsFactory(indexModel){
 
       validationResult = Lawncipher.validateIndexAgainstModel(currentDoc, conflictWithIndexModel);
     }
+
+    console.log('Type mismatches: ' + JSON.stringify(typeMismatches));
 
     if (hadToBeCloned) currentDoc = futureDoc;
 
@@ -465,7 +487,11 @@ function stringifyValue(v){
   else if (v instanceof Date) return v.getTime().toString();
   else if (v instanceof Uint8Array) return libsodium.to_base64(v);
   else if (tv == 'object') return JSON.stringify(v);
-  else throw new TypeError();
+  else {
+    console.log(v);
+    console.log(JSON.stringify(v));
+    throw new TypeError('Cannot stringifyValue() of type ' + tv);
+  }
 }
 
 function generateNewIndexModelFrom(_indexModel){
@@ -612,14 +638,15 @@ function oneTest(cb){
     conflicts[i] = docGenerator.conflict();
   }
 
-  console.log('Generating the indexModel we are going to migrate to');
+  /*console.log('Generating the indexModel we are going to migrate to');
   var futureModel = generateNewIndexModelFrom(initialModel);
   console.log('Index model we will migrate to: ' + JSON.stringify(futureModel, undefined, '\t'));
   console.log('Generating future conflicts (i.e, docs that are valid with the current model, but that will be invalid once we change IndexModels)');
   var futureConflicts = new Array(numFutureConflicts);
   for (var i = 0; i < numFutureConflicts; i++){
     futureConflicts[i] = docGenerator.futureConflict(futureModel);
-  }
+    console.log('Properties of futureConflicts[' + i + ']: ' + JSON.stringify(Object.keys(futureConflicts[i])));
+  }*/
 
   console.log('Instanciating the collection with the index model');
   db.collection(collectionName, function(err, col){
@@ -644,12 +671,23 @@ function oneTest(cb){
 
       docIDs = _docIDs;
 
+      /*setTimeout(function(){
+        console.log('Running the conflicting insertions');
+        doConflicts(col, function(){
+          console.log('Running the future conflicts test (doc insertion followed by failing IndexModel migration)');
+          doFutureConflicts(col, function(){
+            if (cb) cb();
+          });
+        });
+      }, 2500);*/
+
       console.log('Running the conflicting insertions');
       doConflicts(col, function(){
-        console.log('Running the future conflicts test (doc insertion followed by failing IndexModel migration)');
+        if (cb) cb();
+        /*console.log('Running the future conflicts test (doc insertion followed by failing IndexModel migration)');
         doFutureConflicts(col, function(){
           if (cb) cb();
-        });
+        });*/
       });
     });
   }, initialModel);
@@ -662,8 +700,9 @@ function oneTest(cb){
 
     function oneConflict(){
       var currentConflict = conflicts[conflictIndex];
+      console.log('Expected offendingReasons: ' + JSON.stringify(currentConflict.offendingReasons));
       col.save(currentConflict.doc, function(err){
-        if (!err) throw new Error('The conflicting document ' + JSON.stringify(currentConflict.doc) + ' has been saved');
+        if (!err && Object.keys(currentConflict.offendingReasons).length > 0) throw new Error('The conflicting document ' + JSON.stringify(currentConflict.doc) + ' has been saved, while offendingReasons is not empty');
 
         console.log('Error thrown by conflicting document ' + conflictIndex + ' : ' + err);
 
@@ -688,13 +727,16 @@ function oneTest(cb){
     if (next && typeof next != 'function') throw new TypeError('when defined, next must be a function');
 
     //Mass doc insertion
-    col.bulkSave(futureConflicts, function(err, _futureConflictsIDs){
+    col.bulkSave(futureConflicts.map(function(i){return i.doc}), function(err, _futureConflictsIDs){
       if (err) throw err;
 
+      console.log('futureConflictsIDs:\n' + JSON.stringify(_futureConflictsIDs));
       futureConflictsIDs = _futureConflictsIDs;
 
       col.setIndexModel(futureModel, function(err, offendingDocs){
         if (err) throw err;
+
+        assert(Lawncipher.deepObjectEquality(col.getIndexModel(), futureModel));
 
         //Check that the offending docs are as expected
         if (!offendingDocs) throw new Error('No offending docs were found in "doFutureConflicts" on setIndexModel');
