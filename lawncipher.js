@@ -360,6 +360,19 @@
 		}
 	};
 
+	exports.cast = function(value, sourceType, destinationType, check){
+		var currentCastingFunction = typeCastingFunctions[sourceType] && typeCastingFunctions[sourceType][destinationType];
+		if (!currentCastingFunction){
+			throw new Error('Cannot convert ' + sourceType + ' to ' + destinationType);
+		}
+		return currentCastingFunction(value, check);
+	};
+
+	exports.isCastable = function(sourceType, destinationType){
+		var currentCastingFunction = typeCastingFunctions[sourceType] && typeCastingFunctions[sourceType][destinationType];
+		return !!currentCastingFunction;
+	};
+
 	var cryptoFileEncoding = {
 		encrypt: scryptFileEncode,
 		decrypt: scryptFileDecode,
@@ -4641,6 +4654,9 @@
 
 		//Array<PearsonRange>. To be updated on Index instanciation, fragment change and delete events
 		var fragmentsList = [];
+
+		//Index operations list
+		var opQueue = [];
 		/*
 		*	Load state variables
 		*/
@@ -4711,6 +4727,15 @@
 			removeRangeFromFragmentsList(dRange);
 			deleteIndexFragment(dRange)
 		});
+
+		function processOpQueue(){
+			if (opQueue.length == 0) return;
+
+			var currentOperation = opQueue[0];
+
+			//Remove the first element in the queue, since we just completed it
+			currentOperation.splice(0, 1);
+		}
 
 		fs.exists(collectionPath, function(dirExists){
 			if (dirExists){
@@ -4876,6 +4901,7 @@
 					if (currentLoadedFragmentsRange[currentRange.toString()]){
 						//The next range is already loaded in memory
 						console.log('lookupRange');
+						console.log('currentLoadedFragmentsRange:\n' + JSON.stringify(currentLoadedFragmentsRange));
 						var currentNode = theTree.lookupRange(currentRange);
 						cb(null, currentNode);
 					} else {
@@ -6209,6 +6235,7 @@
 
 			function splitNode(noTrigger){
 				if (dataRange.width == 1) return;
+				console.log('splitNode (noTrigger: ' + (typeof noTrigger == 'undefined' ? 'false' : noTrigger.toString()) + ')');
 				var splitedRange = dataRange.split();
 				var leftRange = splitedRange[0], rightRange = splitedRange[1];
 				var leftNode = new TreeNode(leftRange, null, thisNode);
