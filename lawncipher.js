@@ -6286,6 +6286,20 @@
 		  else if (tv == 'object') return JSON.stringify(v);
 		  else throw new TypeError();
 		}
+
+		function destringifyValue(v, t){
+			if (t == 'string') return v;
+			else if (t == 'number') return parseFloat(v);
+			else if (t == 'boolean'){
+				v = v.toLowerCase();
+				if (!(v == 'true' || v == 'false')) throw new RangeError('Invalid stringified boolean value: ' + v);
+				return v == 'true' ? true : false;
+			} else if (t == 'date'){
+				return new Date(parseInt(v));
+			} else if (t == 'buffer') return from_base64(v);
+			else if (t == 'object') return JSON.parse(v);
+			else throw new TypeError('Unsupported type: ' + t);
+		}
 	}
 
 	function PearsonRange(start, end, _rangeStr){
