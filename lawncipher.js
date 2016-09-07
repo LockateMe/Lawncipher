@@ -4660,8 +4660,6 @@
 		var fragmentsList = [];
 
 		//Index operations list
-		var writeLock = false;
-		var writeLockTimeout = 4;
 		var opQueue = [];
 		/*
 		*	Load state variables
@@ -4807,13 +4805,6 @@
 		self.lookup = function(key, cb){
 			if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
-			if (writeLock){
-				setTimeout(function(){
-					self.lookup(key, cb);
-				}, writeLockTimeout);
-				return;
-			}
-
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
 			var keyHash = hashToLong(key);
 
@@ -4860,16 +4851,12 @@
 						return;
 					}
 
-					writeLock = true;
 					theTree.add(key, value, noTrigger, replace, keyHash);
-					writeLock = false;
 
 					if (cb) cb();
 				});
 			} else {
-				writeLock = true;
 				theTree.add(key, value, noTrigger, replace, keyHash);
-				writeLock = false;
 
 				if (cb) cb();
 			}
@@ -4891,15 +4878,13 @@
 						return;
 					}
 
-					writeLock = true;
 					theTree.remove(key, value, noTrigger, keyHash);
-					writeLock = false;
+
 					if (cb) cb();
 				});
 			} else {
-				writeLock = true;
 				theTree.remove(key, value, noTrigger, keyHash);
-				writeLock = false;
+
 				if (cb) cb();
 			}
 		};
@@ -4919,13 +4904,6 @@
 				*/
 				this.next = function(cb){
 					if (typeof cb != 'function') throw new TypeError('cb must be a function');
-
-					if (writeLock){
-						setTimeout(function(){
-							thisIterator.next(cb);
-						}, writeLockTimeout);
-						return;
-					}
 
 					if (!currentRange) currentRange = findRangeOfHash(PearsonRange.MAX_RANGE.start);
 					else if (thisIterator.hasNext()){
@@ -4975,13 +4953,6 @@
 
 				this.next = function(cb){
 					if (typeof cb != 'function') throw new TypeError('cb must be a function');
-
-					if (writeLock){
-						setTimeout(function(){
-							thisIterator.next(cb);
-						}, writeLockTimeout);
-						return;
-					}
 
 					if (!currentNode){
 						nodeIterator.next(function(err, nextNode){
