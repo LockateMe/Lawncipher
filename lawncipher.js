@@ -6284,7 +6284,6 @@
 
 			function splitNode(noTrigger){
 				if (dataRange.width == 1) return;
-				console.log('splitNode (noTrigger: ' + (typeof noTrigger == 'undefined' ? 'false' : noTrigger.toString()) + ')');
 				var splitedRange = dataRange.split();
 				var leftRange = splitedRange[0], rightRange = splitedRange[1];
 				var leftNode = new TreeNode(leftRange, null, thisNode);
