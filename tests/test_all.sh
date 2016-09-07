@@ -31,6 +31,13 @@ node unit_test.js
 
 echo ""
 echo "-----------------------------------"
+echo "Testing IndexModels"
+echo "-----------------------------------"
+echo ""
+node indexmodel.js
+
+echo ""
+echo "-----------------------------------"
 echo "Migration testing (from v1)"
 echo "-----------------------------------"
 echo ""
