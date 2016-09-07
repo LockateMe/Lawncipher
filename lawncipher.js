@@ -4659,8 +4659,6 @@
 		//Array<PearsonRange>. To be updated on Index instanciation, fragment change and delete events
 		var fragmentsList = [];
 
-		//Index operations list
-		var opQueue = [];
 		/*
 		*	Load state variables
 		*/
@@ -4741,15 +4739,6 @@
 			removeRangeFromFragmentsList(dRange);
 			markUnloadOf(dRange);
 		});
-
-		function processOpQueue(){
-			if (opQueue.length == 0) return;
-
-			var currentOperation = opQueue[0];
-
-			//Remove the first element in the queue, since we just completed it
-			currentOperation.splice(0, 1);
-		}
 
 		fs.exists(collectionPath, function(dirExists){
 			if (dirExists){
