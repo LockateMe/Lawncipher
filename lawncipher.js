@@ -333,15 +333,19 @@
 			},
 			buffer: function(s, check){
 				if (typeof s != 'string') throw new TypeError();
-				if (check) return true;
-				return from_string(s);
+				var isValidBase64String = s.length % 4 == 0 && /^(?:[a-z0-9]|\+|\/)+={0,2}$/gi.test(s.replace(/\n/g, ''));
+				if (check){
+					return isValidBase64String;
+				} else if (!isValidBase64String) throw new RangeError('Cannot convert string from base64 to buffer: ' + s);
+
+				return from_base64(s.replace(/\n/g, ''));
 			},
 		},
 		buffer: {
 			string: function(b, check){
 				if (!(b instanceof Uint8Array)) throw new TypeError();
 				if (check) return true;
-				return to_string(b);
+				return to_base64(b, true);
 			},
 		},
 		object: {
@@ -4656,6 +4660,8 @@
 		var fragmentsList = [];
 
 		//Index operations list
+		var writeLock = false;
+		var writeLockTimeout = 4;
 		var opQueue = [];
 		/*
 		*	Load state variables
@@ -4711,7 +4717,7 @@
 		theTree.on('change', function(dRange, d, isUnload){
 			//Updated loaded ranges and ranges list
 			dRange = PearsonRange.fromString(dRange);
-			addRangeToFragmentsList(dRange);
+			//addRangeToFragmentsList(dRange);
 
 			//If we are saving changes before unloading the index fragment, we must not count this last save as "usage"
 			//Preventing counting the range in the LRUStringSet
@@ -4726,6 +4732,16 @@
 			dRange = PearsonRange.fromString(dRange);
 			removeRangeFromFragmentsList(dRange);
 			deleteIndexFragment(dRange)
+		});
+
+		theTree.on('node_addition', function(dRange){
+			addRangeToFragmentsList(dRange);
+			markUsageOf(dRange);
+		});
+
+		theTree.on('node_deletion', function(dRange){
+			removeRangeFromFragmentsList(dRange);
+			markUnloadOf(dRange);
 		});
 
 		function processOpQueue(){
@@ -4791,6 +4807,13 @@
 		self.lookup = function(key, cb){
 			if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
+			if (writeLock){
+				setTimeout(function(){
+					self.lookup(key, cb);
+				}, writeLockTimeout);
+				return;
+			}
+
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
 			var keyHash = hashToLong(key);
 
@@ -4837,12 +4860,16 @@
 						return;
 					}
 
+					writeLock = true;
 					theTree.add(key, value, noTrigger, replace, keyHash);
+					writeLock = false;
 
 					if (cb) cb();
 				});
 			} else {
+				writeLock = true;
 				theTree.add(key, value, noTrigger, replace, keyHash);
+				writeLock = false;
 
 				if (cb) cb();
 			}
@@ -4864,11 +4891,15 @@
 						return;
 					}
 
+					writeLock = true;
 					theTree.remove(key, value, noTrigger, keyHash);
+					writeLock = false;
 					if (cb) cb();
 				});
 			} else {
+				writeLock = true;
 				theTree.remove(key, value, noTrigger, keyHash);
+				writeLock = false;
 				if (cb) cb();
 			}
 		};
@@ -4889,19 +4920,26 @@
 				this.next = function(cb){
 					if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
+					if (writeLock){
+						setTimeout(function(){
+							thisIterator.next(cb);
+						}, writeLockTimeout);
+						return;
+					}
+
 					if (!currentRange) currentRange = findRangeOfHash(PearsonRange.MAX_RANGE.start);
 					else if (thisIterator.hasNext()){
 						currentRange = findRangeOfHash(currentRange.end.add(1));
 					} else {
-						console.log('NEXT() CANNOT FIND NEXT NODE');
+						console.error('NEXT() CANNOT FIND NEXT NODE');
 						cb();
 						return;
 					}
 
 					if (currentLoadedFragmentsRange[currentRange.toString()]){
 						//The next range is already loaded in memory
-						console.log('lookupRange');
-						console.log('currentLoadedFragmentsRange:\n' + JSON.stringify(currentLoadedFragmentsRange));
+						//console.log('lookupRange');
+						//console.log('currentLoadedFragmentsRange:\n' + JSON.stringify(currentLoadedFragmentsRange));
 						var currentNode = theTree.lookupRange(currentRange);
 						cb(null, currentNode);
 					} else {
@@ -4910,7 +4948,7 @@
 								cb(err);
 								return;
 							}
-							console.log('loadIndexFragment callback');
+							//console.log('loadIndexFragment callback');
 							cb(null, receiverNode);
 						}, true); //mustFind == true
 					}
@@ -4937,6 +4975,13 @@
 
 				this.next = function(cb){
 					if (typeof cb != 'function') throw new TypeError('cb must be a function');
+
+					if (writeLock){
+						setTimeout(function(){
+							thisIterator.next(cb);
+						}, writeLockTimeout);
+						return;
+					}
 
 					if (!currentNode){
 						nodeIterator.next(function(err, nextNode){
@@ -6230,6 +6275,10 @@
 					{_delete: true, rangeStr: siblingBinnedRange.range.toString()},
 					{_change: true, rangeStr: parent.range().toString(), subCollection: mergedSubCollection}
 				], noTrigger);
+
+				triggerEv('node_deletion', [thisNodeRange]);
+				triggerEv('node_deletion', [siblingBinnedRange.range]);
+				triggerEv('node_addition', [parent.range()]);
 				//if (!noTrigger) self.triggerEvents();
 			}
 
@@ -6273,6 +6322,10 @@
 					{_change: true, rangeStr: leftRange.toString(), subCollection: leftSubCollection},
 					{_change: true, rangeStr: rightRange.toString(), subCollection: rightSubCollection}
 				], noTrigger);
+
+				triggerEv('node_deletion', [dataRange]);
+				triggerEv('node_addition', [leftRange]);
+				triggerEv('node_addition', [rightRange]);
 				//if (!noTrigger) self.triggerEvents();
 			}
 		}
