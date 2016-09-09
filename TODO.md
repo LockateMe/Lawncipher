@@ -8,8 +8,8 @@
   - [ ] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable
   - [ ] WHAT DOES "doNotApplyModel" ENTAIL???
 - [ ] Add more "unique" & "index" flags test vectors
-- [ ] Add automatic type casting, allowing flexibility when saving a document or migrating index models
-- [ ] Add checks for "index" flag in `validateIndexModel`
+- [x] Add automatic type casting, allowing flexibility when saving a document or migrating index models
+- [x] Add checks for "index" flag in `validateIndexModel`
 - [x] Add tests for 1-node tree iteration
 - [x] Handle the case where a document's size is bigger than the `_nodeMaxSize` - to split a tree leaf, the conditions to be met are (currentSize >= maxNodeSize && currentRange.width > 0)
 - [x] Reduce the default dateGranularity to 1ms
@@ -34,6 +34,7 @@
 - [ ] Write some more `save` and `bulkSave` examples
 - [ ] reorganize the parameters of `retrieveIndexDocsMatchingQuery()`
 - [ ] document the new indexModel API
+- [ ] document the new Collection API
 - [x] test clearIndexModel
 - [x] Native Cordova crypto_secretbox_easy plugin, for iOS and Android
   - [x] crypto_secretbox_easy

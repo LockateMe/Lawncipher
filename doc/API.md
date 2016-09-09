@@ -36,11 +36,11 @@ Close Lawncipher, if open
 ## `db.isOpen()`
 Returns a boolean, indicating whether Lawncipher is open or not
 
-## `db.collection(name, indexModel, callback)`
+## `db.collection(name, callback, [indexModel])`
 Open an existing Lawncipher collection, or creates it if it doesn't exist
 * `String name` : the collection's name
-* `Object|Array<String> indexModel` : the index model. The attributes that will be extracted and/or saved in the collection's \_index file. The query-able data. If the collection already exists, this parameter will simply be ignored. Optional parameter.
 * `Function callback` : callback function, receiving errors or the constructed Collection object (`function(err, collection)`)
+* `Object|Array<String> indexModel` : the index model. The attributes that will be extracted and/or saved in the collection's \_index file. The query-able data. If the collection already exists, this parameter will simply be ignored. Optional parameter.
 * returns the constructed `Collection` object
 
 ## `db.collections(callback)`
@@ -52,6 +52,14 @@ Getting the names of existing collections
 Deleting an existing collection. Note that this operation once invoked cannot be undone.
 * `String collectionName` : the name of the collection to be deleted
 * `Function callback` : the callback function, receiving `(err)`, a string briefly describing the error, if one occurred
+
+## `Collection.getIndexModel()`
+
+## `Collection.setIndexModel(indexModel, cb, doNotApplyModel)`
+
+## `Collection.clearIndexModel(cb)`
+
+## `Collection.isIndexModelCompatible(indexModel, cb)`
 
 ## `Collection.save(doc, cb, [overwrite], [ttl])`
 Save a document/blob in the current collection.

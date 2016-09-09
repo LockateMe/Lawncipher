@@ -23,7 +23,7 @@ Each indexed field has a description. Here are some details about that descripti
 * `unique` and `id` parameters are optional. If not defined, they are then assumed as `false`
 * If you do not need to set more than the `type` in a field's description, then you can replace `yourFieldName: {type: "yourSelectedType"}` by `yourFieldName: "yourSelectedType"`
 * a field marked as `id: true` is also implicitly `unique: true`
-* a field marked as `id: true` must be of type 'string' or 'number'
+* a field marked as `id: true` must be of type 'string', 'number', 'date' or 'buffer'
 * a field marked as `index: true` will have its dedicated search index
 * a field marked as `index: true` must be of one of the following types: `string`, `buffer`, `number`, `date`, `boolean`
 * if a field is marked as `id` or `unique`, no document can have a null/undefined value for that field
@@ -44,5 +44,11 @@ Each indexed field has a description. Here are some details about that descripti
 }
 ```
 
+## IndexModel migration
+
+Here are the rules that must be respected when changing the IndexModel of a collection that already contains data:
+* When setting `unique: true` on already existing (and already populated) field, make sure that all the existing documents in the collection already have unique values for the said field. Otherwise, the IndexModel will be considered as "incompatible" with the collection's current data, and the offending documents will be listed as such in `checkResults` (a callback parameter of `isIndexModelCompatible`)
+* When changing the type of an already existing (and already populated) field,... What will happen?
+
 ## Useless trivia
-The `indexModel` syntax was originally inspired by  [mongoose's](https://github.com/Automattic/mongoose) [Schema syntax](http://mongoosejs.com/docs/guide.html).
+The `indexModel` syntax was originally inspired by [mongoose's](https://github.com/Automattic/mongoose) [Schema syntax](http://mongoosejs.com/docs/guide.html).
