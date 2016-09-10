@@ -779,18 +779,33 @@ function runTests(){
   });
 }
 
-fs.access(dbPath, function(err){
-  if (err){
-    //Folder do not exist, most probably -> runTests
-    runTests();
-  } else {
-    rmdir(dbPath, function(err){
-      if (err) throw err;
-
+if (fs.access){
+  fs.access(dbPath, function(err){
+    if (err){
+      //Folder do not exist, most probably -> runTests
       runTests();
-    });
-  }
-});
+    } else {
+      rmdir(dbPath, function(err){
+        if (err) throw err;
+
+        runTests();
+      });
+    }
+  });
+} else {
+  fs.exists(dbPath, function(exists){
+    if (exists){
+      rmdir(dbPath, function(err){
+        if (err) throw err;
+
+        runTests();
+      });
+    } else {
+      //Folder do not exist, most probably -> runTests
+      runTests();
+    }
+  });
+}
 
 //Have 2 different index models (at least)
 //Generate docs that can go with both models
