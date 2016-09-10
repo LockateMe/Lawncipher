@@ -2554,8 +2554,10 @@
 					if (_saveIndex == dataLength - 1) isLast = true;
 					if (_saveIndex == dataLength) cb(undefined, docIDs);
 					else {
-						if (_saveIndex % 100 == 0) setTimeout(saveOne, 0);
-						else saveOne();
+						if (_saveIndex % 30 == 0){
+							console.log('setTimeout, _saveIndex:' + _saveIndex);
+							setTimeout(saveOne, 0);
+						} else saveOne();
 					}
 				}
 
@@ -3759,14 +3761,20 @@
 					});
 				} else {
 					//console.log('Collection index map operation');
-					function mapUnicitiyCheckFn(doc, emit){
+					var matchedDocs = [];
+					function mapUnicitiyCheckFn(docs){
 						//console.log('mapFn');
-						if (deepObjectEquality(doc.index[fieldName], value)) emit(doc.id);
+						var docsList = Object.keys(docs);
+						for (var i = 0; i < docsList.length; i++){
+							var docId = docsList[i];
+							var doc = docs[docId];
+							if (deepObjectEquality(doc.index[fieldName], value)) matchedDocs.push(docId);
+						}
 					}
 
-					collectionIndex.map(mapUnicitiyCheckFn, function(err, matchedDocs){
+					collectionIndex.map(mapUnicitiyCheckFn, function(err){
 						cb(err, matchedDocs.length <= (postInsert ? 1 : 0));
-					}, 1); //Limit the "map search" to one result
+					}, 1, true); //Limit the "map search" to one result; use in forQuery mode (no calls to clone())
 				}
 			}
 
@@ -4756,7 +4764,9 @@
 
 						if (parsingState.length > 1){
 							fragmentCount++;
-							addRangeToFragmentsList(PearsonRange.fromString(parsingState[1] + '_' + parsingState[2]));
+							var currentRange = PearsonRange.fromString(parsingState[1] + '_' + parsingState[2]);
+							addRangeToFragmentsList(currentRange);
+							theTree.insertRange(currentRange, {});
 						}
 					}
 
@@ -4885,6 +4895,8 @@
 
 				//Iterate over the fragments list
 				var currentRange;
+				var currentNode;
+				var navigationStack = [theTree.rootNode()];
 
 				var thisIterator = this;
 
@@ -4894,36 +4906,50 @@
 				this.next = function(cb){
 					if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
-					if (!currentRange) currentRange = findRangeOfHash(PearsonRange.MAX_RANGE.start);
-					else if (thisIterator.hasNext()){
-						currentRange = findRangeOfHash(currentRange.end.add(1));
-					} else {
-						console.error('NEXT() CANNOT FIND NEXT NODE');
-						cb();
-						return;
+					while (thisIterator.hasNext()){
+						currentNode = navigationStack.pop();
+						if (currentNode.isLeaf()){
+							visitNode(currentNode, cb);
+							return;
+						} else {
+							var left = currentNode.getLeft();
+							var right = currentNode.getRight();
+							if (left) navigationStack.push(left);
+							if (right) navigationStack.push(right);
+						}
 					}
 
-					if (currentLoadedFragmentsRange[currentRange.toString()]){
-						//The next range is already loaded in memory
-						//console.log('lookupRange');
-						//console.log('currentLoadedFragmentsRange:\n' + JSON.stringify(currentLoadedFragmentsRange));
-						var currentNode = theTree.lookupRange(currentRange);
-						cb(null, currentNode);
-					} else {
-						loadIndexFragment(currentRange, function(err, receiverNode){
-							if (err){
-								cb(err);
-								return;
-							}
-							//console.log('loadIndexFragment callback');
-							cb(null, receiverNode);
-						}, true); //mustFind == true
-					}
+					console.error('NEXT() CANNOT FIND NEXT NODE');
+					cb();
 				};
 
 				this.hasNext = function(){
-					return !(currentRange && currentRange.end.equals(PearsonRange.MAX_RANGE.end));
+					return navigationStack.length > 0;
+					//return !(currentRange && currentRange.end.equals(PearsonRange.MAX_RANGE.end));
 				};
+
+				function visitNode(n, next){
+					if (!n.isLeaf()){
+						next();
+						return;
+					}
+
+					if (currentLoadedFragmentsRange[n.range().toString()]){
+						//The next range is already loaded in memory
+						//console.log('lookupRange');
+						//console.log('currentLoadedFragmentsRange:\n' + JSON.stringify(currentLoadedFragmentsRange));
+						next(null, n);
+					} else {
+						loadIndexFragment(n.range(), function(err, receiverNode){
+							if (err){
+								next(err);
+								return;
+							}
+							//console.log('loadIndexFragment callback');
+							next(null, receiverNode);
+						}, true); //mustFind == true
+					}
+				}
 			}
 
 			return new NodeIterator();
@@ -5019,7 +5045,7 @@
 					for (var i = 0; i < keysList.length; i++){
 						currentSubCollection[keysList[i]].id = keysList[i];
 						mapFn(currentSubCollection[keysList[i]], emit);
-						if (limit && resultSet.length == limit){
+						if (limit && resultSet.length >= limit){
 							limitReached = true;
 							break;
 						}
@@ -5158,7 +5184,7 @@
 
 			var freedSize = markUnloadOf(fRange);
 
-			theTree.trimRange(fRange);
+			theTree.insertRange(fRange, {});
 
 			if (_cb) _cb(undefined, freedSize);
 		}
