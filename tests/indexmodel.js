@@ -682,13 +682,16 @@ function oneTest(cb){
       }, 2500);*/
 
       console.log('Running the conflicting insertions');
-      doConflicts(col, function(){
-        if (cb) cb();
-        /*console.log('Running the future conflicts test (doc insertion followed by failing IndexModel migration)');
-        doFutureConflicts(col, function(){
+      setTimeout(function(){
+        doConflicts(col, function(){
+          col.close();
           if (cb) cb();
-        });*/
-      });
+          /*console.log('Running the future conflicts test (doc insertion followed by failing IndexModel migration)');
+          doFutureConflicts(col, function(){
+            if (cb) cb();
+          });*/
+        });
+      }, 0);
     });
   }, initialModel);
 
@@ -770,6 +773,7 @@ function oneTest(cb){
 function runTests(){
   initTests(function(){
     oneTest(function(){
+      db.close();
       console.log('oneTest completed');
     });
   });
