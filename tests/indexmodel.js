@@ -319,6 +319,7 @@ function docGeneratorsFactory(indexModel){
         if (currentFieldValuesList.length == 0) continue;
         //Randomly select an existing value
         var existingValue = randomSelectionFromArray(currentFieldValuesList);
+        existingValue = destringifyValue(existingValue, indexModel[currentConflictField].type);
         //Set it on the conflictingDoc
         conflictingDoc[currentConflictField] = existingValue;
         //Add it as an offending reason for the doc
@@ -492,6 +493,20 @@ function stringifyValue(v){
     console.log(JSON.stringify(v));
     throw new TypeError('Cannot stringifyValue() of type ' + tv);
   }
+}
+
+function destringifyValue(v, t){
+  if (t == 'string') return v;
+  else if (t == 'number') return parseFloat(v);
+  else if (t == 'boolean'){
+    v = v.toLowerCase();
+    if (!(v == 'true' || v == 'false')) throw new RangeError('Invalid stringified boolean value: ' + v);
+    return v == 'true' ? true : false;
+  } else if (t == 'date'){
+    return new Date(parseInt(v));
+  } else if (t == 'buffer') return libsodium.from_base64(v);
+  else if (t == 'object') return JSON.parse(v);
+  else throw new TypeError('Unsupported type: ' + t);
 }
 
 function generateNewIndexModelFrom(_indexModel){
@@ -703,9 +718,25 @@ function oneTest(cb){
 
     function oneConflict(){
       var currentConflict = conflicts[conflictIndex];
-      console.log('Expected offendingReasons: ' + JSON.stringify(currentConflict.offendingReasons));
       col.save(currentConflict.doc, function(err){
-        if (!err && Object.keys(currentConflict.offendingReasons).length > 0) throw new Error('The conflicting document ' + JSON.stringify(currentConflict.doc) + ' has been saved, while offendingReasons is not empty');
+        if (!err && Object.keys(currentConflict.offendingReasons).length > 0){
+          console.log('Expected offendingReasons: ' + JSON.stringify(currentConflict.offendingReasons));
+          throw new Error('The conflicting document ' + JSON.stringify(currentConflict.doc) + ' has been saved, while offendingReasons is not empty');
+        }
+
+        if (err){
+          if (typeof err != 'string') throw err;
+
+          var typeMismatchRegex = /^INVALID_INDEX_DATA:(\w+)$/;
+          var collisionRegex = /^DUPLICATE_UNIQUE_VALUE:(\w+)$/;
+          var idCollisionRegex = /^DUPLICATE_ID$/;
+
+          var typeMismatchResult = typeMismatchRegex.exec(err);
+          var collisionResult = collisionRegex.exec(err);
+          var idCollisionRegex = idCollisionRegex.exec(err);
+
+
+        }
 
         console.log('Error thrown by conflicting document ' + conflictIndex + ' : ' + err);
 

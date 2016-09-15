@@ -2346,8 +2346,8 @@
 						//Validation of index data against the model
 						var validationResult = validateIndexAgainstModel(indexData, collectionIndexModel);
 						if (typeof validationResult == 'string' || !validationResult){ //In case a field name or nothing is returned by the validation, error
-							console.error('validationResult: ' + JSON.stringify(validationResult));
-							cb('INVALID_INDEX_DATA');
+							//console.error('validationResult: ' + JSON.stringify(validationResult));
+							cb('INVALID_INDEX_DATA:' + validationResult);
 							return;
 						}
 						//Else, Returned an object containing the validated data
@@ -2554,10 +2554,11 @@
 					if (_saveIndex == dataLength - 1) isLast = true;
 					if (_saveIndex == dataLength) cb(undefined, docIDs);
 					else {
-						if (_saveIndex % 30 == 0){
+						/*if (_saveIndex % 50 == 0){
 							console.log('setTimeout, _saveIndex:' + _saveIndex);
 							setTimeout(saveOne, 0);
-						} else saveOne();
+						} else saveOne();*/
+						setTimeout(saveOne, 0);
 					}
 				}
 
@@ -4667,6 +4668,112 @@
 		//Array<PearsonRange>. To be updated on Index instanciation, fragment change and delete events
 		var fragmentsList = [];
 
+		//Index operations queue
+		var opQueueRanges = []; //Array<PearsonRangeStr>
+		var opQueueTasksPerRange = {}; //Hash<PearsonRangeStr, Array<Function>>
+		var opCount = 0;
+		var checkMemoryUsageLock = false;
+
+		//An processOpQueue call recurses on the same range that it started with, if possible... Otherwise, just take the next range to be processed
+		//Parallel
+		function processOpQueue(_range){
+			if (opQueueRanges.length == 0 && !_range) return;
+
+			var currentTaskRange;
+			var currentTaskRangeStr;
+			var currentTaskList;
+			var currentTask;
+
+			if (_range){
+				currentTaskRange = _range;
+			} else {
+				currentTaskRange = getRangeFromQueue();
+			}
+
+			if (!currentTaskRange) return;
+			currentTaskRangeStr = currentTaskRange.toString();
+
+			//Check that there is indeed pending tasks for the provided range. If there isn't, fallback to the next range in opQueue
+			if (_range && !opQueueTasksPerRange[currentTaskRangeStr]){
+				if (opQueueRanges.length == 0) return;
+
+				currentTaskRange = getRangeFromQueue();
+				if (!currentTaskRange) return;
+				currentTaskRangeStr = currentTaskRange.toString();
+			}
+
+			currentTaskList = opQueueTasksPerRange[currentTaskRangeStr];
+			currentTask = currentTaskList[0];
+			currentTaskList.splice(0, 1);
+
+			//Check whether the current range still has pending operations in its queue
+			var hasPendingWorkForRange;
+			if (currentTaskList.length == 0){
+				delete opQueueTasksPerRange[currentTaskRangeStr];
+				hasPendingWorkForRange = false;
+			} else {
+				hasPendingWorkForRange = true;
+			}
+
+			currentTask(next);
+
+			function next(e){
+				if (e) throw e;
+
+				opCount++;
+				if (opQueueRanges.length > 0 || hasPendingWorkForRange){
+					if (opCount % 100 == 0){
+						setTimeout(function(){
+							processOpQueue(currentTaskRange);
+						}, 0);
+					} else {
+						processOpQueue(currentTaskRange);
+					}
+				}
+			}
+
+			function getRangeFromQueue(){
+				var selectedRange;
+				while (!selectedRange){
+					if (opQueueRanges.length == 0) return;
+
+					var nextRange = opQueueRanges[0];
+					opQueueRanges.splice(0, 1);
+
+					//Check that there is actually a pending task for the "nextRange"
+					var nextRangeQueue = opQueueTasksPerRange[nextRange.toString()];
+					if (nextRangeQueue){
+						if (nextRangeQueue.length == 0){
+							delete opQueueTasksPerRange[nextRange.toString()]; //There is a queue, but its empty... Look for a new nextRange
+							continue;
+						}
+
+						//There are pending tasks for nextRange. Therefore, we select nextRange...
+						selectedRange = nextRange;
+					}
+				}
+
+				return selectedRange;
+			}
+		}
+
+		function addToOpQueue(task, range, highPrority){
+			if (typeof task != 'function') throw new TypeError('task must be a function');
+			if (!(range instanceof PearsonRange)) throw new TypeError('range must be a PearsonRange instance');
+
+			var rangeStr = range.toString();
+			if (opQueueTasksPerRange[rangeStr]){
+				opQueueTasksPerRange[rangeStr].push(task);
+			} else {
+				opQueueTasksPerRange[rangeStr] = [task];
+			}
+
+			if (highPrority) opQueueRanges.splice(0, 0, range);
+			else opQueueRanges.push(range);
+
+			processOpQueue();
+		}
+
 		/*
 		*	Load state variables
 		*/
@@ -4718,7 +4825,7 @@
 			return bufferBEToLong(theHasher(s, isLookup), isLookup);
 		};
 
-		theTree.on('change', function(dRange, d, isUnload){
+		var changeEventHandler = function(dRange, d, isUnload, cb, highPrority){
 			//Updated loaded ranges and ranges list
 			dRange = PearsonRange.fromString(dRange);
 			//addRangeToFragmentsList(dRange);
@@ -4726,17 +4833,54 @@
 			//If we are saving changes before unloading the index fragment, we must not count this last save as "usage"
 			//Preventing counting the range in the LRUStringSet
 			if (!isUnload){
-				markUsageOf(dRange);
+				markUsageOf(dRange, jsonSize(d));
 			}
-			saveIndexFragment(dRange, d);
-		});
+			//saveIndexFragment(dRange, d);
 
-		theTree.on('delete', function(dRange){
+			addToOpQueue(function(next){
+				console.log('save task start');
+				saveIndexFragment(dRange, d, function(err){
+					console.log('save end');
+					if (err){
+						if (cb) cb(err);
+						else throw err;
+						return;
+					}
+
+					if (cb) cb();
+
+					next();
+				});
+			}, dRange, highPrority);
+		};
+
+		var deleteEventHandler = function(dRange, cb, highPrority){
 			//Updated loaded ranges and ranges list
 			dRange = PearsonRange.fromString(dRange);
 			removeRangeFromFragmentsList(dRange);
-			deleteIndexFragment(dRange)
-		});
+			//deleteIndexFragment(dRange);
+
+			console.log('Adding delete(' + dRange.toString() + ') to queue');
+			addToOpQueue(function(next){
+				console.log('Delete task start');
+				deleteIndexFragment(dRange, function(err){
+					console.log('Delete end');
+					if (err){
+						if (cb) cb(err);
+						else throw err;
+						return;
+					}
+
+					if (cb) cb();
+
+					next();
+				});
+			}, dRange, highPrority);
+		}
+
+		theTree.on('change', changeEventHandler);
+
+		theTree.on('delete', deleteEventHandler);
 
 		theTree.on('node_addition', function(dRange){
 			addRangeToFragmentsList(dRange);
@@ -4840,20 +4984,25 @@
 			//Key type check is done in hasher, so it's implicitly done in hashToLong
 			var keyHash = theHasher(key);
 			var keyHashLong = bufferBEToLong(keyHash);
+			var rangeOfKey = findRangeOfHash(keyHashLong);
 
 			//Check that data range is loaded before performing the addition
-			if (!isRangeOfHashLoaded(keyHashLong)){
-				loadIndexFragmentForHash(keyHashLong, function(err){
-					if (err){
-						if (cb) cb(err);
-						else throw err;
-						return;
-					}
+			if (!isRangeLoaded(rangeOfKey)){
+				addToOpQueue(function(nextQueueOp){
+					loadIndexFragment(rangeOfKey, function(err){
+						if (err){
+							if (cb) cb(err);
+							else throw err;
+							return;
+						}
 
-					theTree.add(key, value, noTrigger, replace, keyHash);
+						theTree.add(key, value, noTrigger, replace, keyHash);
 
-					if (cb) cb();
-				});
+						nextQueueOp();
+
+						if (cb) cb();
+					});
+				}, rangeOfKey);
 			} else {
 				theTree.add(key, value, noTrigger, replace, keyHash);
 
@@ -4868,19 +5017,24 @@
 
 			var keyHash = theHasher(key, true); //Lookup mode: on
 			var keyHashLong = !Array.isArray(keyHash) ? bufferBEToLong(keyHash) : undefined;
+			var rangeOfKey = findRangeOfHash(keyHashLong);
 
-			if (!isRangeOfHashLoaded(keyHashLong)){
-				loadIndexFragmentForHash(keyHashLong, function(err){
-					if (err){
-						if (cb) cb(err);
-						else throw err;
-						return;
-					}
+			if (!isRangeLoaded(rangeOfKey)){
+				addToOpQueue(function(nextQueueOp){
+					loadIndexFragment(rangeOfKey, function(err){
+						if (err){
+							if (cb) cb(err);
+							else throw err;
+							return;
+						}
 
-					theTree.remove(key, value, noTrigger, keyHash);
+						theTree.remove(key, value, noTrigger, keyHash);
 
-					if (cb) cb();
-				});
+						nextQueueOp();
+
+						if (cb) cb();
+					});
+				}, rangeOfKey);
 			} else {
 				theTree.remove(key, value, noTrigger, keyHash);
 
@@ -4910,12 +5064,15 @@
 						currentNode = navigationStack.pop();
 						if (currentNode.isLeaf()){
 							visitNode(currentNode, cb);
+							//console.log('Ranges in stack:\n' + JSON.stringify(navigationStack.map(function(i){return i.range().toString()})));
 							return;
 						} else {
 							var left = currentNode.getLeft();
 							var right = currentNode.getRight();
-							if (left) navigationStack.push(left);
+							//We want to pop the left-side leaves first, then right-side ones
 							if (right) navigationStack.push(right);
+							if (left) navigationStack.push(left);
+							//console.log('Ranges in stack:\n' + JSON.stringify(navigationStack.map(function(i){return i.range().toString()})));
 						}
 					}
 
@@ -5112,23 +5269,42 @@
 				}
 
 				if (!fileData){
+					/*if (mustFind){
+						err = 'fileData is not defined';
+						//console.error(err);
+						if (_cb) _cb(err);
+						else throw err;
+						return;
+					}*/
 					err = 'fileData is not defined';
-					//console.error(err);
-					_cb(err);
+
+					if (_cb) _cb(err);
+					else throw err;
 					return;
 				}
 
 				if (!(fileData instanceof Uint8Array || Buffer.isBuffer(fileData))){
 					err = 'fileData is of invalid type';
 					//console.error(err);
-					_cb(err);
+					if (_cb) _cb(err);
+					else throw err;
 					return;
 				}
 
 				if (fileData.length == 0){
+					/*if (mustFind){
+						console.log('fileData happens to be empty for range ' + fRange.toString());
+						err = 'fileData happens to be empty!';
+						//console.error(err);
+						if (_cb) _cb(err);
+						else throw err;
+						return;
+					}*/
+					console.log('fileData happens to be empty for range ' + fRange.toString());
 					err = 'fileData happens to be empty!';
-					//console.error(err);
-					_cb(err);
+
+					if (_cb) _cb(err);
+					else throw err;
 					return;
 				}
 
@@ -5146,14 +5322,14 @@
 
 					markUsageOf(fRange, fragmentPlainText.length);
 
-					checkMemoryUsage();
+					setTimeout(checkMemoryUsage, 0);
 
 					if (_cb) _cb(undefined, receiverNode);
 				});
 			});
 		}
 
-		function unloadIndexFragment(_cb){
+		function unloadIndexFragment(_cb, fRange){
 			var fRangeStr = fragmentsLRU.lru();
 			if (!fRangeStr){ //If the LRU set returns nothing, then there is nothing to be unloaded
 				if (_cb) _cb();
@@ -5166,27 +5342,70 @@
 
 			var pendingEvents = theTree.extractPendingEventsForRange(fRange);
 			if (pendingEvents.length > 0){
-				//Do the crypto and IO writes. Do not actually trigger the event, becuase it will mess up the internal state of the index (with calls to markUsageOf, addRangeToFragmentsList, removeRangeFromFragmentsList)
+				/*//Do the crypto and IO writes. Do not actually trigger the event, becuase it will mess up the internal state of the index (with calls to markUsageOf, addRangeToFragmentsList, removeRangeFromFragmentsList)
 				for (var i = 0; i < pendingEvents.length; i++){
 					var currEvent = pendingEvents[i];
 					var currentRange = PearsonRange.fromString(currEvent.rangeStr);
 					if (currEvent._change){
-						triggerEv('change', [currEvent.rangeStr, currEvent.subCollection, true]);
+						changeEventHandler(currEvent.rangeStr, currEvent.subCollection, true);
 					} else if (currEvent._delete){
-						triggerEv('delete', [currEvent.rangeStr]);
+						deleteEventHandler(currEvent.rangeStr);
 					} else {
 						var e = shallowCopy(currEvent);
 						if (e.subCollection) delete e.subCollection;
 						console.error('Unexpected event type for event: ' + JSON.stringify(e));
 					}
+				}*/
+				console.log('There are pending events');
+				var pendingEventIndex = 0;
+				function processPendingEvent(){
+					var currEvent = pendingEvents[pendingEventIndex];
+					if (currEvent._change){
+						changeEventHandler(currEvent.rangeStr, currEvent.subCollection, true, function(err){
+							if (err){
+								console.error('Error while handling pending change event for range ' + fRangeStr + ': ' + err);
+							}
+
+							nextPendingEvent();
+						}, true);
+					} else if (currEvent._delete){
+						deleteEventHandler(currEvent.rangeStr, function(err){
+							if (err){
+								console.error('Error while handling pending delete event for range ' + fRangeStr + ': ' + err);
+							}
+
+							nextPendingEvent();
+						}, true);
+					} else {
+						var e = shallowCopy(currEvent);
+						if (e.subCollection) delete e.subCollection; //To free some memory
+						console.error('Unexpected event type for event: ' + JSON.stringify(e));
+						nextPendingEvent();
+					}
 				}
+
+				function nextPendingEvent(){
+					pendingEventIndex++;
+					if (pendingEventIndex == pendingEvents.length){
+						endUnload();
+					} else {
+						if (pendingEventIndex % 100 == 0) setTimeout(processPendingEvent, 0);
+						else processPendingEvent();
+					}
+				}
+
+				processPendingEvent();
+			} else {
+				endUnload();
 			}
 
-			var freedSize = markUnloadOf(fRange);
+			function endUnload(){
+				var freedSize = markUnloadOf(fRange);
 
-			theTree.insertRange(fRange, {});
+				theTree.insertRange(fRange, {});
 
-			if (_cb) _cb(undefined, freedSize);
+				if (_cb) _cb(undefined, freedSize);
+			}
 		}
 
 		function saveIndexFragment(fRange, fData, _cb){
@@ -5214,7 +5433,7 @@
 
 					markUsageOf(fRange, fragmentPlainText.length);
 
-					checkMemoryUsage();
+					setTimeout(checkMemoryUsage, 0);
 
 					if (_cb) _cb();
 				});
@@ -5222,7 +5441,7 @@
 		}
 
 		function deleteIndexFragment(fRange, _cb){
-			//console.log('Deleting ' + fRange.toString());
+			console.log('Deleting ' + fRange.toString());
 			var fragmentPath = pathJoin(collectionPath, fragmentNameBuilder(fRange))
 			fs.unlink(fragmentPath, function(err){
 				if (err){
@@ -5282,6 +5501,7 @@
 
 		function markUsageOf(fRange, dataSize){
 			var fRangeStr = fRange.toString();
+			//console.log('Mark usage of ' + fRangeStr);
 
 			if (dataSize){ //Data size corresponding to fRange needs to be updated if dataSize is provided
 				if (currentLoadedFragmentsSize[fRangeStr]) currentDataLoad -= currentLoadedFragmentsSize[fRangeStr];
@@ -5298,12 +5518,17 @@
 
 		function markUnloadOf(fRange){
 			var fRangeStr = fRange.toString();
+			//console.log('Mark unload of ' + fRangeStr);
 			//Check that the range is flagged as "loaded" and has its size in currentLoadedFragmentsSize
-			if (!currentLoadedFragmentsSize[fRangeStr]) return;
+			var freedSize = 0;
+			if (currentLoadedFragmentsSize[fRangeStr]){
+				freedSize = currentLoadedFragmentsSize[fRangeStr];
+				currentDataLoad -= currentLoadedFragmentsSize[fRangeStr];
+				delete currentLoadedFragmentsSize[fRangeStr];
+			}
+			//Remove fRangeStr from fragmentsLRU
+			fragmentsLRU.remove(fRangeStr);
 
-			var freedSize = currentLoadedFragmentsSize[fRangeStr];
-			currentDataLoad -= currentLoadedFragmentsSize[fRangeStr];
-			delete currentLoadedFragmentsSize[fRangeStr];
 			delete currentLoadedFragmentsRange[fRangeStr];
 
 			return freedSize;
@@ -5341,11 +5566,41 @@
 		}
 
 		function checkMemoryUsage(){
-			if (currentDataLoad <= maxDataLoad) return;
+			//If the memory limit hasn't been reached, or if a memory release is in progress, return
+			if (currentDataLoad <= maxDataLoad || checkMemoryUsageLock) return;
 
-			while (currentDataLoad > maxDataLoad){
-				unloadIndexFragment();
+			checkMemoryUsageLock = true;
+
+			//Write an async loop that does the same result as the sync loop written below
+			//Add a checkMemoryUsage lock, that is set to true while the async loop is running
+
+			var unloadCount = 0;
+
+			function unloadOne(){
+				console.log('Unload one')
+				unloadIndexFragment(function(err){
+					console.log('Unload end');
+					if (err){
+						console.error(err);
+					}
+
+					unloadNext();
+				});
 			}
+
+			function unloadNext(){
+				console.log('unloadNext');
+				if (currentDataLoad > maxDataLoad){
+					unloadCount++;
+					if (unloadCount % 25 == 0) setTimeout(unloadOne, 0);
+					else unloadOne();
+				} else {
+					//We are done, for now
+					checkMemoryUsageLock = false;
+				}
+			}
+
+			unloadOne();
 		}
 	}
 
@@ -5489,7 +5744,7 @@
 			if (!(typeof dateGranularity == 'number' && Math.floor(dateGranularity) == dateGranularity && dateGranularity > 0)) throw new TypeError('when defined, dateGranularity must be a strictly positive integer number')
 		} else dateGranularity = 1; //By default, keeps it precise up to the millisecond
 
-		var hasher = function(d, isLookup){
+		var hasher = function(d){
 			var td = checkHashable(d);
 
 			//Type conversions. Beware : the order here matters
@@ -5598,6 +5853,7 @@
 
 		//Event postponing is used if timeouts are not
 		self.triggerEvents = function(){
+			console.log('triggerEvents');
 			if (eventsQueue.length == 0) return;
 
 			var changeEvents = {}; //{rangeId, subCollectionRef}
@@ -5627,7 +5883,9 @@
 
 		self.extractPendingEventsForRange = function(r){
 			if (!(r instanceof PearsonRange)) throw new TypeError('r must be a PearsonRange instance');
-			if (eventsQueue.length == 0) return [];
+			if (eventsQueue.length == 0){
+				return [];
+			}
 
 			var parsedRanges = {};
 			var pendingEventsSet = {};
@@ -5643,8 +5901,9 @@
 
 				//The latest events are at the end of the event queue
 				//Hence, for a given range, the events that need to be taken into account are the ones that are the closest to the end of the event queue
+				//Hence we begin with the oldest events and move along the queue, keeping only the most recent events for the given range
 				//Remove the matched events from the event queue, as they will be "handled" by the methods caller (usually unloadIndexFragment)
-				if (currRange.isRangeContainedIn(r)){
+				if (currRange.isContainedIn(r)){
 					eventsQueue.splice(i, 1);
 					i--;
 					pendingEventsSet[currEvent.rangeStr] = currEvent;
@@ -5653,7 +5912,9 @@
 
 			var subRangesList = Object.keys(pendingEventsSet);
 			//No events in the queue matched the provided range
-			if (subRangesList.length == 0) return [];
+			if (subRangesList.length == 0){
+				return [];
+			}
 
 			var extractedFinalEventsList = new Array(subRangesList.length);
 			for (var i = 0; i < subRangesList.length; i++){
@@ -5700,6 +5961,8 @@
 		self.add = function(key, value, noTrigger, replace, _withHash){
 			checkHashable(key);
 			//if (!((typeof key == 'string' && key.length > 0) || (typeof key == 'number' && !isNaN(key)))) throw new TypeError('key must be a non-empty string or a number');
+
+			//Add a callback, and pass it along the tree nodes, so that it can be called back after the change/delete events
 
 			var valType = typeof value;
 			if (!(valType == 'string' || valType == 'number' || valType == 'boolean' || valType == 'object')) throw new TypeError('value must either be a string, a number, a boolean or a JSON object');
@@ -5894,6 +6157,7 @@
 			var handlers = _handlers || evHandlers;
 			if (!handlers[evName]) return;
 
+			console.log('[event:' + evName + '] ' + args[0].toString());
 			var currentEvHandlers = handlers[evName];
 			for (var i = 0; i < currentEvHandlers.length; i++){
 				currentEvHandlers[i].apply(undefined, args);
@@ -6255,6 +6519,10 @@
 				parent.setLeft(undefined);
 				parent.setSubCollection(mergedSubCollection);
 
+				triggerEv('node_deletion', [thisNodeRange]);
+				triggerEv('node_deletion', [siblingBinnedRange.range]);
+				triggerEv('node_addition', [parent.range()]);
+
 				//trigger delete events for sub-ranges for this node and its sibling
 				self.scheduleEvents([
 					{_delete: true, rangeStr: thisNodeRange.toString()},
@@ -6262,9 +6530,6 @@
 					{_change: true, rangeStr: parent.range().toString(), subCollection: mergedSubCollection}
 				], noTrigger);
 
-				triggerEv('node_deletion', [thisNodeRange]);
-				triggerEv('node_deletion', [siblingBinnedRange.range]);
-				triggerEv('node_addition', [parent.range()]);
 				//if (!noTrigger) self.triggerEvents();
 			}
 
@@ -6301,6 +6566,11 @@
 				rightNode.setSubCollection(rightSubCollection);
 				//Clear data from this node
 				subCollection = null;
+
+				triggerEv('node_deletion', [dataRange]);
+				triggerEv('node_addition', [leftRange]);
+				triggerEv('node_addition', [rightRange]);
+
 				//Trigger events
 				self.scheduleEvents([
 					{_delete: true, rangeStr: dataRange.toString()},
@@ -6308,18 +6578,15 @@
 					{_change: true, rangeStr: rightRange.toString(), subCollection: rightSubCollection}
 				], noTrigger);
 
-				triggerEv('node_deletion', [dataRange]);
-				triggerEv('node_addition', [leftRange]);
-				triggerEv('node_addition', [rightRange]);
 				//if (!noTrigger) self.triggerEvents();
 			}
 		}
 
 		self.TreeNode = TreeNode;
 
-		function hashToLong(d, isLookup){
+		function hashToLong(d){
 			//Type conversions and checks are now done by hasher()
-			return bufferBEToLong(hasher(d, isLookup), isLookup);
+			return bufferBEToLong(hasher(d));
 		}
 
 		function findCommonPrefix(a, b){
@@ -6482,6 +6749,10 @@
 		return new PearsonRange(rangeParts.start, rangeParts.end, rangeStr);
 	};
 
+	PearsonRange.isValidRangeString = function(rangeStr){
+		return typeof rangeStr == 'string' && rangeStr.length == 33 && /^[0-9a-f]{16}_[0-9a-f]{16}$/gi.test(rangeStr);
+	};
+
 	PearsonRange.MAX_RANGE = PearsonRange.fromString('0000000000000000_ffffffffffffffff');
 
 	function LRUStringSet(){
@@ -6510,21 +6781,23 @@
 		return this._d.pop();
 	};
 
-	function bufferBEToLong(b, isArrayOfBuffers){
-		if (isArrayOfBuffers && Array.isArray(b) && b.length > 0){
-			/*
-			* Why that many conditions? Because isArrayOfBuffers == true when isLookup == true
-			* But isLookup == true when the tree/index is performing a lookup, regardless of index type
-			* So, it happens often that we don't receive an array even though isArrayOfBuffers == true
-			* Therefore, we also have to check that b is indeed an array when isArrayOfBuffers == true
-			*/
-			var r = [];
-			for (var i = 0; i < b.length; i++){
-				r.push(bufferBEToLong(b[i]));
+	LRUStringSet.prototype.remove = function(elem){
+		if (!(typeof elem == 'string' && elem.length > 0)) return -1;
+
+		var foundAt = -1;
+		for (var i = 0; i < this._d.length; i++){
+			if (this._d[i] == elem){
+				foundAt = i;
+				break;
 			}
-			return r;
 		}
 
+		if (foundAt != -1) this._d.splice(foundAt, 1);
+
+		return foundAt;
+	};
+
+	function bufferBEToLong(b){
 		var l = 0, h = 0;
 		for (var i = 0; i < 4; i++){
 			h += b[i] * Math.pow(2, 8 * (3 - i));

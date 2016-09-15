@@ -162,7 +162,7 @@ function returnAndLog(v){
 }
 
 //A testing method, designed to test save, loading, lookup and removal of a non-negligeable data set
-function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
+function loadTests(docCount, cb, usingNoTrigger, indexType, unique, maxLoadedDataSize){
 	docCount = docCount || 1000;
 	if (typeof cb != 'function') throw new TypeError('cb must be a function');
 
@@ -208,6 +208,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 		pearsonSeed: indexSeed,
 		indexKeyType: indexType,
 		uniqueIndex: unique,
+		_maxLoadedDataSize: maxLoadedDataSize,
 	};
 
 	function saveIndex(_next){
@@ -248,6 +249,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 					}
 
 					function nextAdd(){
+						console.log('Next add');
 						addIndex++;
 						if (addIndex == docCount){
 							var saveDuration = clock(saveStart);
@@ -353,7 +355,8 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 
 		var destroyStart = clock();
 
-		if (usingNoTrigger){
+		/*if (usingNoTrigger){
+			console.log('usingNoTrigger');
 			for (var i = 0; i < docCount - 1; i++){
 				testIndex.remove(dataSet[i].k, indexType == 'boolean' ? dataSet[i].v : undefined, undefined, true);
 			}
@@ -366,7 +369,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 				_next();
 			});
 
-		} else {
+		} else {*/
 			var removeIndex = 0;
 
 			function removeOne(){
@@ -391,7 +394,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 			}
 
 			removeOne();
-		}
+		//}
 	}
 
 	function checkDestruction(_next){
@@ -411,7 +414,7 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 
 					if (indexType == 'boolean') console.log('val: ' + JSON.stringify(value));
 
-					assert(!(value || (Array.isArray(value) && value.length > 0)));
+					assert(!(value || (Array.isArray(value) && value.length > 0)), 'Cannot assert that the element no. ' + lookupIndex + ' has been removed; currentTuple:\n' + JSON.stringify(currentTuple, undefined, '\t') + '\n\nvalue found:\n' + JSON.stringify(value, undefined, '\t'));
 
 					nextLookup();
 				});
@@ -460,14 +463,19 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique){
 	}
 
 	saveIndex(function(){
-		loadIndex(function(){
-			destroyIndex(function(){
-				checkDestruction(cb);
+		setTimeout(function(){
+			loadIndex(function(){
+				destroyIndex(function(){
+					setTimeout(function(){
+						checkDestruction(cb);
+					}, 5000);
+				});
 			});
-		});
+		}, 2500);
 	});
 }
 
+/*
 showSectionMessage('Basic index testing');
 basicTests(function(){
 	console.log('done');
@@ -518,14 +526,20 @@ basicTests(function(){
 									var duration = clock(st3);
 									console.log('done in ' + duration.toString() + 'ms');
 
-									if (!runMega) return;
+									showSectionMessage('Dynamic index loading test');
+									var st_memory = clock();
+									loadTests(10000, function(){
+											var duration = clock(st_memory);
+											console.log('done in ' + duration.toString() + 'ms');
+											if (!runMega) return;
 
-									showSectionMessage('Mega load index testing (500k docs)');
-									var st4 = clock();
-									loadTests(500000, function(){
-										var duration = clock(st4);
-										console.log('done in ' + duration.toString() + 'ms');
-									}, true);
+											showSectionMessage('Mega load index testing (500k docs)');
+											var st4 = clock();
+											loadTests(500000, function(){
+												var duration = clock(st4);
+												console.log('done in ' + duration.toString() + 'ms');
+											}, true);
+									}, true, undefined, true, 1024 * 1024); //type: default, 'string'; unique: false; maxLoadedDataSize = 1MB
 								}, true);
 							}, true, 'boolean');
 						}, true, 'date');
@@ -534,7 +548,15 @@ basicTests(function(){
 			});
 		}, 'date');
 	}, 'number');
-});
+});*/
+
+showSectionMessage('Dynamic index loading test');
+var st_memory = clock();
+loadTests(10000, function(){
+		var duration = clock(st_memory);
+		console.log('done in ' + duration.toString() + 'ms');
+
+}, true, undefined, false, 1024 * 1024); //noTrigger: true, type: default, 'string'; unique: false; maxLoadedDataSize = 1MB
 
 function showSectionMessage(m){
 	console.log('');

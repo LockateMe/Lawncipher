@@ -9,5 +9,6 @@ fi
 
 for ((a=1; a<=$1 ; a++))
 do
+	echo "Run $a"
 	node $2 $3 $4 $5 $6 $7 $8 $9
 done
