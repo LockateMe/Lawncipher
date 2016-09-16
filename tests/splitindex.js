@@ -377,7 +377,15 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique, maxLoadedDat
 				testIndex.remove(currentTuple.k, indexType == 'boolean' ? currentTuple.v : undefined, function(err){
 					if (err) throw err;
 
-					nextRemoval();
+					if (!(indexType == 'boolean')){
+						testIndex.lookup(currentTuple.k, function(err, remainingValue){
+							if (err) throw err;
+
+							assert(!(remainingValue || (Array.isArray(remainingValue) && remainingValue.length > 0)), 'Cannot assert that the element no. ' + removeIndex + ' has been removed; currentTuple:\n' + JSON.stringify(currentTuple, undefined, '\t') + '\n\nvalue found:\n' + JSON.stringify(remainingValue, undefined, '\t'));
+
+							nextRemoval();
+						});
+					} else nextRemoval();
 				}, usingNoTrigger && removeIndex < docCount - 1);
 			}
 
