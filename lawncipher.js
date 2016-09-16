@@ -4892,6 +4892,14 @@
 			markUnloadOf(dRange);
 		});
 
+		theTree.setDataLoader(function(range, callback){
+			if (!isRangeLoaded(range)){
+				loadIndexFragment(range, callback);
+			} else {
+				callback();
+			}
+		});
+
 		fs.exists(collectionPath, function(dirExists){
 			if (dirExists){
 				fs.readdir(collectionPath, function(err, collectionDirList){
@@ -5803,6 +5811,7 @@
 		//'delete', parameters: range_string
 
 		var evHandlers = {};
+		var dataLoader;
 		var rootNode = new TreeNode(PearsonRange.MAX_RANGE);
 
 		/**
@@ -5842,6 +5851,18 @@
 			} else {
 				delete evHandlers[eventName];
 			}
+		};
+
+		self.setDataLoader = function(dataLoadingFunction){
+			if (dataLoadingFunction){
+				if (typeof dataLoadingFunction != 'function') throw new TypeError('when defined, dataLoadingFunction must be a function');
+
+				dataLoader = dataLoadingFunction;
+			} else dataLoader = undefined;
+		};
+
+		self.getDataLoader = function(){
+			return dataLoader;
 		};
 
 		//Event postponing is used if timeouts are not
@@ -6495,38 +6516,49 @@
 				if (!sibling.isLeaf()) return; //Give up the merge if sibling node is not also a leaf
 
 				//CALL DATA ASYNC DATA LOADER HERE...
+				if (dataLoader){
+					dataLoader(sibling.range(), function(err){
+						if (err) throw err;
 
-				var thisNodeRange = thisNode.range();
-				var siblingBinnedRange = sibling.getBinnedRange();
-
-				var mergedSubCollection = {};
-
-				var myValueList = Object.keys(subCollection);
-				for (var i = 0; i < myValueList.length; i++){
-					mergedSubCollection[myValueList[i]] = subCollection[myValueList[i]];
+						continueMerge();
+					});
+				} else {
+					continueMerge();
 				}
 
-				var siblingValueList = Object.keys(siblingBinnedRange.subCollection);
-				for (var i = 0; i < siblingValueList.length; i++){
-					mergedSubCollection[siblingValueList[i]] = siblingBinnedRange.subCollection[siblingValueList[i]];
+				function continueMerge(){
+					var thisNodeRange = thisNode.range();
+					var siblingBinnedRange = sibling.getBinnedRange();
+
+					var mergedSubCollection = {};
+
+					var myValueList = Object.keys(subCollection);
+					for (var i = 0; i < myValueList.length; i++){
+						mergedSubCollection[myValueList[i]] = subCollection[myValueList[i]];
+					}
+
+					var siblingValueList = Object.keys(siblingBinnedRange.subCollection);
+					for (var i = 0; i < siblingValueList.length; i++){
+						mergedSubCollection[siblingValueList[i]] = siblingBinnedRange.subCollection[siblingValueList[i]];
+					}
+
+					parent.setRight(undefined);
+					parent.setLeft(undefined);
+					parent.setSubCollection(mergedSubCollection);
+
+					triggerEv('node_deletion', [thisNodeRange]);
+					triggerEv('node_deletion', [siblingBinnedRange.range]);
+					triggerEv('node_addition', [parent.range()]);
+
+					//trigger delete events for sub-ranges for this node and its sibling
+					self.scheduleEvents([
+						{_delete: true, rangeStr: thisNodeRange.toString()},
+						{_delete: true, rangeStr: siblingBinnedRange.range.toString()},
+						{_change: true, rangeStr: parent.range().toString(), subCollection: mergedSubCollection}
+					], noTrigger);
+
+					//if (!noTrigger) self.triggerEvents();
 				}
-
-				parent.setRight(undefined);
-				parent.setLeft(undefined);
-				parent.setSubCollection(mergedSubCollection);
-
-				triggerEv('node_deletion', [thisNodeRange]);
-				triggerEv('node_deletion', [siblingBinnedRange.range]);
-				triggerEv('node_addition', [parent.range()]);
-
-				//trigger delete events for sub-ranges for this node and its sibling
-				self.scheduleEvents([
-					{_delete: true, rangeStr: thisNodeRange.toString()},
-					{_delete: true, rangeStr: siblingBinnedRange.range.toString()},
-					{_change: true, rangeStr: parent.range().toString(), subCollection: mergedSubCollection}
-				], noTrigger);
-
-				//if (!noTrigger) self.triggerEvents();
 			}
 
 			function splitNode(noTrigger){
