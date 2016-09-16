@@ -1029,6 +1029,7 @@
 		*/
 		this.collection = function(name, callback, _indexModel){
 			if (typeof name != 'string') throw new TypeError('name must be a string');
+			if (name == '__sync') throw new Error('Collection cannot be named "_sync" (this name is reserved for Lawncipher\'s internal use)')
 
 			if (typeof callback != 'function') throw new TypeError('callback must be a function');
 
@@ -1253,6 +1254,11 @@
 								}
 
 								collectionIndexModel = collectionMeta.indexModel;
+								if (collectionIndexModel){
+									collectionIndexModel = validateIndexModel(collectionIndexModel); //Revalidate indexModel. That re-sets the "$summary" property
+									if (typeof collectionIndexModel == 'string') throw new Error('FATAL INTERNAL ERROR: the saved index model is not valid');
+								}
+
 								indexesSeeds = collectionMeta.indexesSeeds;
 								indexesFileFormatVersions = collectionMeta.indexesVersions;
 
