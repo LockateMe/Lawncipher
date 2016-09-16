@@ -5,7 +5,7 @@
 - [x] Be sure that indexing is explained properly
 - [ ] indexModel apply on existing docs, "rollback"-able to allow some room for type misfits?
   - [x] add a method to make a "dry run" of a indexModel change. The method will iterate and validate each document against the new indexModel. No change will be made on the docs/collection though. But this method can prevent us from having to design a "rollback"-able indexModel change...
-  - [ ] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable
+  - [x] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable. (Operation queueing in each Index instance)
   - [ ] WHAT DOES "doNotApplyModel" ENTAIL???
 - [ ] Add more "unique" & "index" flags test vectors
 - [x] Add automatic type casting, allowing flexibility when saving a document or migrating index models
@@ -24,7 +24,7 @@
     * ~~how is it stored on disk?~~
     * ~~see how cryptDB deals with booleans?~~
     * boolean indices will be built on a <DocId, BooleanValue> unique index
-  - [ ] or how to deal with unread message in lockateme? A special collection that contains the IDs of these unread messages... Much faster to implement, and potentially more secure? (the name of the collection, `unreadmessages` is in plaintext however, and its size on disk can let an attacker "guess" how many unread messages you have, maybe)
+  - [x] (Done with boolean indexes) ~~or how to deal with unread message in lockateme? A special collection that contains the IDs of these unread messages... Much faster to implement, and potentially more secure? (the name of the collection, `unreadmessages` is in plaintext however, and its size on disk can let an attacker "guess" how many unread messages you have, maybe)~~
   - [x] dates & number index
     - [x] ~~-> get inspired by cryptDB~~
     - [x] string encoding for numbers (and decimals!), that respect order/lexicographical relation. But that won't fix the problem you will have with the Pearson hashing function (loss of order)
@@ -52,3 +52,4 @@
 ## For v2.1
 - [ ] Add an optional "default" value for a given field in IndexModel
 - [ ] `$fuzzy`, `$contain`/`$like`, `$fuzzylike`  matching on strings
+- [ ] Synchronization, on the cloud, HTTP+TLS+(HPKA||password)
