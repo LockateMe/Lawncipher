@@ -4961,16 +4961,22 @@
 				and lookup again.
 			*/
 			if (!inTreeValue && !isRangeOfHashLoaded(keyHash)){
-				loadIndexFragmentForHash(keyHash, function(err){
-					if (err){
-						cb(err);
-						return;
-					}
+				var rangeOfKey = findRangeOfHash(keyHash);
+				addToOpQueue(function(nextQueueOp){
+					loadIndexFragment(rangeOfKey, function(err){
+						if (err){
+							cb(err);
+							return;
+						}
 
-					//Data range usage doesn't "need" to be marked in this case, because loadIndexFragmentForHash does it, through loadIndexFragment
-					inTreeValue = theTree.lookup(key, keyHash);
-					cb(undefined, inTreeValue);
-				});
+						//Data range usage doesn't "need" to be marked in this case, because loadIndexFragmentForHash does it, through loadIndexFragment
+						inTreeValue = theTree.lookup(key, keyHash);
+
+						nextQueueOp();
+
+						cb(undefined, inTreeValue);
+					});
+				}, rangeOfKey);
 			} else {
 				markUsageOfHash(keyHash);
 				cb(undefined, inTreeValue);
@@ -5097,14 +5103,18 @@
 						//console.log('currentLoadedFragmentsRange:\n' + JSON.stringify(currentLoadedFragmentsRange));
 						next(null, n);
 					} else {
-						loadIndexFragment(n.range(), function(err, receiverNode){
-							if (err){
-								next(err);
-								return;
-							}
-							//console.log('loadIndexFragment callback');
-							next(null, receiverNode);
-						}, true); //mustFind == true
+						addToOpQueue(function(nextOp){
+							loadIndexFragment(n.range(), function(err, receiverNode){
+								if (err){
+									next(err);
+									return;
+								}
+
+								nextOp();
+								//console.log('loadIndexFragment callback');
+								next(null, receiverNode);
+							}, true); //mustFind == true
+						}, n.range());
 					}
 				}
 			}
@@ -5342,21 +5352,7 @@
 
 			var pendingEvents = theTree.extractPendingEventsForRange(fRange);
 			if (pendingEvents.length > 0){
-				/*//Do the crypto and IO writes. Do not actually trigger the event, becuase it will mess up the internal state of the index (with calls to markUsageOf, addRangeToFragmentsList, removeRangeFromFragmentsList)
-				for (var i = 0; i < pendingEvents.length; i++){
-					var currEvent = pendingEvents[i];
-					var currentRange = PearsonRange.fromString(currEvent.rangeStr);
-					if (currEvent._change){
-						changeEventHandler(currEvent.rangeStr, currEvent.subCollection, true);
-					} else if (currEvent._delete){
-						deleteEventHandler(currEvent.rangeStr);
-					} else {
-						var e = shallowCopy(currEvent);
-						if (e.subCollection) delete e.subCollection;
-						console.error('Unexpected event type for event: ' + JSON.stringify(e));
-					}
-				}*/
-				console.log('There are pending events');
+				console.log('There are ' + pendingEvents.length + ' pending events');
 				var pendingEventIndex = 0;
 				function processPendingEvent(){
 					var currEvent = pendingEvents[pendingEventIndex];
@@ -5577,9 +5573,7 @@
 			var unloadCount = 0;
 
 			function unloadOne(){
-				console.log('Unload one')
 				unloadIndexFragment(function(err){
-					console.log('Unload end');
 					if (err){
 						console.error(err);
 					}
@@ -5589,7 +5583,6 @@
 			}
 
 			function unloadNext(){
-				console.log('unloadNext');
 				if (currentDataLoad > maxDataLoad){
 					unloadCount++;
 					if (unloadCount % 25 == 0) setTimeout(unloadOne, 0);
@@ -5906,6 +5899,7 @@
 				if (currRange.isContainedIn(r)){
 					eventsQueue.splice(i, 1);
 					i--;
+					//if (pendingEventsSet[currEvent.rangeStr]) console.log('Replacing an event object with a more recent one')
 					pendingEventsSet[currEvent.rangeStr] = currEvent;
 				}
 			}
@@ -6499,6 +6493,8 @@
 
 				var sibling = isLeftNode ? parent.getRight() : parent.getLeft(); //sibling = child of same parent, at the opposite side
 				if (!sibling.isLeaf()) return; //Give up the merge if sibling node is not also a leaf
+
+				//CALL DATA ASYNC DATA LOADER HERE...
 
 				var thisNodeRange = thisNode.range();
 				var siblingBinnedRange = sibling.getBinnedRange();
