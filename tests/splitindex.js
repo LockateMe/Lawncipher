@@ -249,7 +249,6 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique, maxLoadedDat
 					}
 
 					function nextAdd(){
-						console.log('Next add');
 						addIndex++;
 						if (addIndex == docCount){
 							var saveDuration = clock(saveStart);
@@ -483,7 +482,6 @@ function loadTests(docCount, cb, usingNoTrigger, indexType, unique, maxLoadedDat
 	});
 }
 
-/*
 showSectionMessage('Basic index testing');
 basicTests(function(){
 	console.log('done');
@@ -534,11 +532,14 @@ basicTests(function(){
 									var duration = clock(st3);
 									console.log('done in ' + duration.toString() + 'ms');
 
+									/*
+									//Dynamic index unloading (with a maxDataLoad quota; disabled)
 									showSectionMessage('Dynamic index loading test');
 									var st_memory = clock();
 									loadTests(10000, function(){
 											var duration = clock(st_memory);
 											console.log('done in ' + duration.toString() + 'ms');
+
 											if (!runMega) return;
 
 											showSectionMessage('Mega load index testing (500k docs)');
@@ -547,7 +548,16 @@ basicTests(function(){
 												var duration = clock(st4);
 												console.log('done in ' + duration.toString() + 'ms');
 											}, true);
-									}, true, undefined, true, 1024 * 1024); //type: default, 'string'; unique: false; maxLoadedDataSize = 1MB
+									}, true, undefined, true, 1024 * 1024);*/ //type: default, 'string'; unique: false; maxLoadedDataSize = 1MB
+
+									if (!runMega) return;
+
+									showSectionMessage('Mega load index testing (500k docs)');
+									var st4 = clock();
+									loadTests(500000, function(){
+										var duration = clock(st4);
+										console.log('done in ' + duration.toString() + 'ms');
+									}, true);
 								}, true);
 							}, true, 'boolean');
 						}, true, 'date');
@@ -556,15 +566,16 @@ basicTests(function(){
 			});
 		}, 'date');
 	}, 'number');
-});*/
+});
 
-showSectionMessage('Dynamic index loading test');
+//Dynamic index unloading (with a maxDataLoad quota; disabled)
+/*showSectionMessage('Dynamic index loading test');
 var st_memory = clock();
 loadTests(10000, function(){
 		var duration = clock(st_memory);
 		console.log('done in ' + duration.toString() + 'ms');
 
-}, true, undefined, false, 1024 * 1024); //noTrigger: true, type: default, 'string'; unique: false; maxLoadedDataSize = 1MB
+}, true, undefined, false, 1024 * 1024);*/ //noTrigger: true, type: default, 'string'; unique: false; maxLoadedDataSize = 1MB
 
 function showSectionMessage(m){
 	console.log('');

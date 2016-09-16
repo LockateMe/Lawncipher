@@ -4597,7 +4597,7 @@
 			pearsonSeed = settings.pearsonSeed,
 			indexKeyType = settings.indexKeyType,
 			_uniqueIndex = settings.uniqueIndex,
-			_maxLoadedDataSize = settings._maxLoadedDataSize
+			//_maxLoadedDataSize = settings._maxLoadedDataSize,
 			_maxNodeSize = settings._maxNodeSize;
 
 		//Checking the type and lenght of rootPath
@@ -4617,7 +4617,7 @@
 		//Checking that a callback has indeed been given
 		if (typeof loadCallback != 'function') throw new TypeError('loadCallback must be a function');
 		//Checking that, if defined, _maxLoadedDataSize is a strictly positive integer number
-		if (_maxLoadedDataSize && !(typeof _maxLoadedDataSize == 'number' && Math.floor(_maxLoadedDataSize) == _maxLoadedDataSize) && _maxLoadedDataSize > 0) throw new TypeError('when defined, settings._maxLoadedDataSize must be a strictly positive integer');
+		//if (_maxLoadedDataSize && !(typeof _maxLoadedDataSize == 'number' && Math.floor(_maxLoadedDataSize) == _maxLoadedDataSize) && _maxLoadedDataSize > 0) throw new TypeError('when defined, settings._maxLoadedDataSize must be a strictly positive integer');
 		//Checking that, if defined, _maxNodeSize is a strictly positive integer number
 		if (_maxNodeSize && !(typeof _maxNodeSize == 'number' && Math.floor(_maxNodeSize) == _maxNodeSize && _maxNodeSize > 0)) throw new TypeError('when defined, settings._maxNodeSize must be a strictly positive integer');
 		//Checking that, if defined, _preloadedTree is indeed a PearsonBPlusTree instance
@@ -4633,7 +4633,7 @@
 				indexName: indexName,
 				collectionKey: collectionKey,
 				pearsonSeed: pearsonSeed,
-				_maxLoadedDataSize: _maxLoadedDataSize,
+				//_maxLoadedDataSize: _maxLoadedDataSize,
 				_maxNodeSize: _maxNodeSize,
 			};
 			var boolIndex = new BooleanIndex(boolIndexSettings, function(loadErr){
@@ -4808,7 +4808,7 @@
 			before it starts using dynamic data loading
 			// 50MB = 50 * 1024 * 1024 = 52428800 ?? What default value should we assign to this??
 		*/
-		var maxDataLoad = _maxLoadedDataSize || 52428800;
+		//var maxDataLoad = _maxLoadedDataSize || 52428800;
 
 		/*
 			A "least recently used" string set, to keep track of which
@@ -4838,9 +4838,7 @@
 			//saveIndexFragment(dRange, d);
 
 			addToOpQueue(function(next){
-				console.log('save task start');
 				saveIndexFragment(dRange, d, function(err){
-					console.log('save end');
 					if (err){
 						if (cb) cb(err);
 						else throw err;
@@ -4860,11 +4858,8 @@
 			removeRangeFromFragmentsList(dRange);
 			//deleteIndexFragment(dRange);
 
-			console.log('Adding delete(' + dRange.toString() + ') to queue');
 			addToOpQueue(function(next){
-				console.log('Delete task start');
 				deleteIndexFragment(dRange, function(err){
-					console.log('Delete end');
 					if (err){
 						if (cb) cb(err);
 						else throw err;
@@ -5340,7 +5335,7 @@
 
 					markUsageOf(fRange, fragmentPlainText.length);
 
-					setTimeout(checkMemoryUsage, 0);
+					//setTimeout(checkMemoryUsage, 0);
 
 					if (_cb) _cb(undefined, receiverNode);
 				});
@@ -5437,7 +5432,7 @@
 
 					markUsageOf(fRange, fragmentPlainText.length);
 
-					setTimeout(checkMemoryUsage, 0);
+					//setTimeout(checkMemoryUsage, 0);
 
 					if (_cb) _cb();
 				});
@@ -5445,7 +5440,6 @@
 		}
 
 		function deleteIndexFragment(fRange, _cb){
-			console.log('Deleting ' + fRange.toString());
 			var fragmentPath = pathJoin(collectionPath, fragmentNameBuilder(fRange))
 			fs.unlink(fragmentPath, function(err){
 				if (err){
@@ -5867,7 +5861,6 @@
 
 		//Event postponing is used if timeouts are not
 		self.triggerEvents = function(){
-			console.log('triggerEvents');
 			if (eventsQueue.length == 0) return;
 
 			var changeEvents = {}; //{rangeId, subCollectionRef}
@@ -6172,7 +6165,6 @@
 			var handlers = _handlers || evHandlers;
 			if (!handlers[evName]) return;
 
-			console.log('[event:' + evName + '] ' + args[0].toString());
 			var currentEvHandlers = handlers[evName];
 			for (var i = 0; i < currentEvHandlers.length; i++){
 				currentEvHandlers[i].apply(undefined, args);
