@@ -735,10 +735,8 @@ function oneTest(cb){
           var collisionResult = collisionRegex.exec(err);
           var idCollisionRegex = idCollisionRegex.exec(err);
 
-
+          console.log('Error thrown by conflicting document ' + conflictIndex + ' : ' + err);
         }
-
-        console.log('Error thrown by conflicting document ' + conflictIndex + ' : ' + err);
 
         nextConflict();
       });
