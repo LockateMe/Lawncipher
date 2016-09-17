@@ -3742,7 +3742,7 @@
 						//console.log('Lookup complete');
 
 						var isFieldValueUnique;
-						if (matchingDocIds && Array.isArray(matchingDocIds)){
+						if (Array.isArray(matchingDocIds)){
 							//console.log('Array returned');
 							//The search index returned an array.
 							//The field is unique depending on the number of elements it contains and the postInsert parameter
@@ -4270,7 +4270,7 @@
 			return true;
 		} else if (paramType == 'function'){
 			throw new TypeError('Cannot check equality for functions');
-		} else return o1 == o2;
+		} else return o1 === o2;
 	}
 	exports.deepObjectEquality = deepObjectEquality;
 
