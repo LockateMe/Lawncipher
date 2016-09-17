@@ -34,7 +34,7 @@ echo "-----------------------------------"
 echo "Testing IndexModels"
 echo "-----------------------------------"
 echo ""
-node indexmodel.js
+node --stack_size=4096 indexmodel.js
 
 echo ""
 echo "-----------------------------------"
