@@ -3083,37 +3083,6 @@
 						dataset = queryResults;
 						queryResults = [];
 					} else return sortAndReturn();
-
-					/*var subMatchingFunctions = new Array(orQuery.length);
-					for (var i = 0; i < orQuery.length; i++){
-						subMatchingFunctions[i] = attributeValueCheckFactory(orQuery[i], matchFunction);
-					}
-
-					for (var i = 0; i < dataset.length; i++){
-						var isMatch = false;
-						for (var j = 0; j < subMatchingFunctions.length && !isMatch; j++){
-							isMatch |= subMatchingFunctions[j](dataset[i].index);
-							if (isMatch){
-								queryResults.push(dataset[i]);
-								break;
-							}
-						}
-					}*/
-
-					/*//This is disturbingly inefficient
-					var partialResults = [];
-					for (var i = 0; i < orQuery.length; i++){
-						//Querying the dataset with one of the $or operand's parameters
-						var currentPartialResult = applyQuery(orQuery[i], dataset, limit, matchFunction);
-
-						//No partial result found
-						if (currentPartialResult.length == 0) continue;
-						partialResults.push(currentPartialResult);
-					}
-
-					//Merge partial results into one dataset and return it
-					queryResults = unionResults(partialResults, limit);
-					//return sortAndReturn();*/
 				}
 				//Detect $not keyword
 				if (query['$not']){
@@ -3147,17 +3116,26 @@
 						queryResults = [];
 					} else return sortAndReturn();
 				}
+
 				//Last case, standard "and" operation
 				var selectedMatchFunction = matchFunction || defaultMatchFunction;
 
-				//console.log('Dataset to search through: ' + JSON.stringify(dataset));
+				//Removing operators from queryAttributes
+				for (var i = 0; i < queryAttributes.length; i++){
+					if (queryAttributes[i].indexOf('$') === 0){
+						queryAttributes.splice(i, 1);
+						i--;
+					}
+				}
 
+				//Case of the empty query {} (excluding operators)
 				if (queryAttributes.length == 0){ //If there are no query components, match all the dataset, with the limit if one is imposed, if there is no sorting (otherwise it will be done after sorting, in sortAndReturn())
 					if (limit && !withSorting) for (var i = 0; i < limit && i < dataset.length; i++) queryResults.push(dataset[i]);
 					else queryResults = dataset;
 					return sortAndReturn();
 				}
 
+				//Attribute-value matching. Simply testing wether {queryAttribute1: queryValue1, ...} match any document in the current dataset
 				var attributeValueCheck = attributeValueCheckFactory(query, selectedMatchFunction, queryAttributes);
 
 				for (var i = 0; i < dataset.length; i++){
@@ -3173,23 +3151,6 @@
 						queryResults.push(dataset[i]);
 						if (limit && queryResults.length == limit && !withSorting) return sortAndReturn();
 					}
-
-					/*var matchedAttributes = 0;
-					for (var j = 0; j < queryAttributes.length; j++){
-						//Skipping query attribute names that begin with the dollar sign, as they are query operators that must have been managed before hand
-						if (queryAttributes[i].indexOf('$') === 0) continue;
-
-						//Exclude the attribute that equals with $match. Note that not all docs have index data
-						if (selectedMatchFunction(dataset[i].index[queryAttributes[j]], query[queryAttributes[j]])){
-							matchedAttributes++;
-
-							if (matchedAttributes == queryAttributes.length){
-								queryResults.push(dataset[i]);
-								if (limit && queryResults.length == limit && !withSorting) return sortAndReturn();
-								break;
-							}
-						} else break; //If one of the query attributes is not matched, go to next document
-					}*/
 				}
 
 				return sortAndReturn();
@@ -3270,15 +3231,12 @@
 				var selectedMatchFunction = matchFunction || defaultMatchFunction;
 
 				return function(docIndex){
-					//console.log('current docIndex:\n' + JSON.stringify(docIndex, undefined, '\t'));
 					var matchedAttributes = 0;
 					for (var i = 0; i < queryAttributes.length; i++){
 						if (selectedMatchFunction(docIndex[queryAttributes[i]], query[queryAttributes[i]])){
 							matchedAttributes++;
 						} else break;
 					}
-					//console.log('Matched attributes: ' + matchedAttributes);
-					//console.log('Expected matching attributes: ' + queryAttributes.length);
 					return matchedAttributes === queryAttributes.length;
 				}
 			}
