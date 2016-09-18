@@ -539,7 +539,7 @@
 		cryptoProvAsync = true;
 
 		scryptProv = function(password, salt, opsLimit, r, p, keyLength, callback){
-			MiniSodium.crypto_pwhash_scryptsalsa208sha256_ll(keyLength, password, salt, opsLimit, r, p, callback);
+			MiniSodium.crypto_pwhash_scryptsalsa208sha256_ll(password, salt, opsLimit, r, p, keyLength, callback);
 		};
 		scryptProvAsync = true;
 
