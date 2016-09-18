@@ -27,8 +27,6 @@
     "**/.*",
     "node_modules",
     "bower_components",
-    "test",
-    "tests",
     ".gitlab-ci.yml",
     "Gruntfile.js"
   ],
