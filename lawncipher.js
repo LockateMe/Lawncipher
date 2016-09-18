@@ -2959,26 +2959,175 @@
 					delete query.$skip;
 				}
 
-				if (collectionIndexModel && collectionIndexModel.$summary.indexedFields.length > 0){
-					//There are search indexes that can be useful for our query
-
-				}
-
 				var resultSet = [];
 
-				function mapFn(subset, countResult){
-					var partialResult = applyQuery(query, subset, undefined, matchFunction, includePureBlobs);
-					Array.prototype.push.apply(resultSet, partialResult);
+				var queryAttributes = Object.keys(query);
+				for (var i = 0; i < queryAttributes.length; i++){
+					if (queryAttributes[i].indexOf('$') === 0){
+						queryAttributes.splice(i, 1);
+						i--;
+					}
 				}
 
-				collectionIndex.map(mapFn, function(err){
-					if (err){
-						cb(err);
-						return;
+				Object.defineProperty(query, '$queryAttributes', {
+					value: queryAttributes,
+				});
+
+				if (collectionIndexModel && collectionIndexModel.$summary.indexedFields.length > 0){
+					//There might be search indexes that can be useful for our query. Looking them up
+					var indexedFieldsFromQuery = [];
+					var indexedFields = collectionIndexModel.$summary.indexedFields;
+
+					for (var i = 0; i < queryAttributes.length; i++){
+						for (var j = 0; j < indexedFields.length; j++){
+							if (queryAttributes[i] === indexedFields[j]){
+								indexedFieldsFromQuery.push(queryAttributes[i]);
+								break;
+							}
+						}
 					}
 
-					cb(undefined, sortAndSkipQuery ? applyQuery(sortAndSkipQuery, resultSet, limit, includePureBlobs) : resultSet);
-				}, limit, true); //true : forQuery. Passes entire leaf data without clone
+					//Check that there is indeed an instanciated index for each indexed field
+					for (var i = 0; i < indexedFieldsFromQuery.length; i++){
+						if (!searchIndices[indexedFieldsFromQuery[i]]){
+							indexedFieldsFromQuery.splice(i, 1);
+							i--;
+						}
+					}
+
+					if (indexedFieldsFromQuery.length === 0){
+						//There are no indexed query fields/attributes. Resorting to iterationOverIndex
+						return iterationOverIndex();
+					}
+
+					var indexedFieldIndex = 0;
+					var partialResults = {};
+
+					function retrieveOne(){
+						var currentIndexedField = indexedFieldsFromQuery[indexedFieldIndex];
+						var currentIndex = searchIndices[currentIndexedField];
+
+						currentIndex.lookup(query[currentIndexedField], function(err, matchedDocs){
+							if (err){
+								cb(err);
+								return;
+							}
+
+							if (matchedDocs){
+								partialResults[currentIndexedField] = Array.isArray(matchedDocs) ? matchedDocs : [matchedDocs];
+							}
+
+							retrieveNext();
+						});
+					}
+
+					function retrieveNext(){
+						indexedFieldIndex++;
+						if (indexedFieldIndex === indexedFieldsFromQuery.length){
+							//Intersect partialResults, if any
+							var currentResultSet = intersectDocIds(partialResults);
+							//Remove the attributes that we already processed from the query (through the search indices)
+							for (var i = 0; i < indexedFieldsFromQuery.length; i++){
+								delete query[indexedFieldsFromQuery[i]];
+							}
+							//Retrieve the matched docs
+							lookupMatchingDocs(currentResultSet, function(err, currentDataset){
+								if (err){
+									cb(err);
+									return;
+								}
+
+								if (sortAndSkipQuery){
+									//Add the $sort and $skip that were previously removed
+									query.$sort = sortAndSkipQuery.$sort;
+									query.$skip = sortAndSkipQuery.$skip;
+								}
+								//Process the rest of the query, with the $sort, $skip and the limit parameter
+								//Note that, because currentDataset is Hash<DocId, Doc>, a full deep-copy of this object is built at the beginning of applyQuery
+								//This deep-copy is NECESSARY for the database data to be immutable...
+								resultSet = applyQuery(query, currentDataset, limit, matchFunction, includePureBlobs);
+								cb(undefined, resultSet);
+							});
+						} else {
+							retrieveOne();
+						}
+					}
+
+					retrieveOne();
+
+					//Builds the set intersection of a set of Array<String>
+					function intersectDocIds(partialResults){
+						var partialResultsList = Object.keys(partialResults);
+						if (partialResultsList.length > 0){
+							var currentResultSet = {};
+							for (var i = 0; i < partialResults[partialResultsList[0]].length; i++){
+								currentResultSet[partialResults[partialResultsList[0]][i]] = true;
+							}
+							for (var i = 1; i < partialResultsList.length; i++){
+								//Checking that every element in currentResultSet is also present in every remaining partialResults chunk
+								for (var currentResult in currentResultSet){
+									var currentResultFound = false;
+									for (var j = 0; j < partialResults[partialResultsList[i]].length; j++){
+										if (partialResults[partialResultsList[i]][j] === currentResult){
+											currentResultFound = true;
+											break;
+										}
+									}
+									if (!currentResultFound) delete currentResultSet[currentResult];
+								}
+							}
+						}
+
+						//Transforming the Hash<DocId, true> to Array<DocId>
+						return Object.keys(currentResultSet);
+					}
+
+					//Lookup the docs matching the docIds in docsList, and builds a Hash<DocId, Doc>
+					function lookupMatchingDocs(docsList, _cb){
+						var lookupIndex = 0;
+						var matchingDocs = {};
+
+						function lookupOne(){
+							var currentDocId = docsList[lookupIndex];
+							collectionIndex.lookup(currentDocId, function(err, currentDoc){
+								if (err){
+									console.error('Error while looking up a document after an index-accelerated search: ' + err);
+									_cb(err);
+									return;
+								}
+
+								matchingDocs[currentDocId] = currentDoc;
+								lookupNext();
+							});
+						}
+
+						function lookupNext(){
+							lookupNext++;
+							if (lookupNext === docsList.length){
+								_cb(undefined, matchingDocs);
+							} else {
+								if (lookupNext % 100 === 0) setTimeout(lookupOne, 0);
+								else lookupOne();
+							}
+						}
+					}
+				} else {
+					function mapFn(subset, countResult){
+						//Note that, because subset is Hash<DocId, Doc>, a full deep-copy of this object is built at the beginning of applyQuery
+						//This deep-copy is NECESSARY for the database data to be immutable, because we are calling collectionIndex.map with forQuery === true
+						var partialResult = applyQuery(query, subset, undefined, matchFunction, includePureBlobs);
+						Array.prototype.push.apply(resultSet, partialResult);
+					}
+
+					collectionIndex.map(mapFn, function(err){
+						if (err){
+							cb(err);
+							return;
+						}
+
+						cb(undefined, sortAndSkipQuery ? applyQuery(sortAndSkipQuery, resultSet, limit, includePureBlobs) : resultSet);
+					}, limit, true); //true : forQuery. Passes entire leaf data without clone
+				}
 			}
 
 			function applyQuery(query, dataset, limit, matchFunction, includePureBlobs){
@@ -3121,10 +3270,15 @@
 				var selectedMatchFunction = matchFunction || defaultMatchFunction;
 
 				//Removing operators from queryAttributes
-				for (var i = 0; i < queryAttributes.length; i++){
-					if (queryAttributes[i].indexOf('$') === 0){
-						queryAttributes.splice(i, 1);
-						i--;
+				if (query.$queryAttributes){
+					//That job may already have been done earlier. Use the result
+					queryAttributes = query.$queryAttributes;
+				} else {
+					for (var i = 0; i < queryAttributes.length; i++){
+						if (queryAttributes[i].indexOf('$') === 0){
+							queryAttributes.splice(i, 1);
+							i--;
+						}
 					}
 				}
 
@@ -3220,11 +3374,16 @@
 			}
 
 			function attributeValueCheckFactory(query, matchFunction, _queryAttributes){
-				var queryAttributes = _queryAttributes || Object.keys(query);
-				for (var i = 0; i < queryAttributes.length; i++){
-					if (queryAttributes[i].indexOf('$') === 0){
-						queryAttributes.splice(i, 1);
-						i--;
+				var queryAttributes;
+				if (query.$queryAttributes){
+					queryAttributes = query.$queryAttributes;
+				} else {
+					queryAttributes = _queryAttributes || Object.keys(query);
+					for (var i = 0; i < queryAttributes.length; i++){
+						if (queryAttributes[i].indexOf('$') === 0){
+							queryAttributes.splice(i, 1);
+							i--;
+						}
 					}
 				}
 
