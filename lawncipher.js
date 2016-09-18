@@ -1029,7 +1029,7 @@
 		*/
 		this.collection = function(name, callback, _indexModel){
 			if (typeof name != 'string') throw new TypeError('name must be a string');
-			if (name == '__sync') throw new Error('Collection cannot be named "_sync" (this name is reserved for Lawncipher\'s internal use)')
+			if (name.indexOf('__sync') === 0 || name === '__temp') throw new Error('Collection cannot be named "__temp" or have a name beginning with "__sync" (these names are reserved for Lawncipher\'s internal use)')
 
 			if (typeof callback != 'function') throw new TypeError('callback must be a function');
 
