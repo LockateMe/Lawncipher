@@ -15,7 +15,7 @@
 - [x] Reduce the default dateGranularity to 1ms
 - [x] Add `meta.indexVersions`, to store the index file and formats versions
 - [x] Check that, when unloading an index fragment, the latest changes are saved, if needed...
-- [ ] indexes on `index: true` flag in indexModel. will work best string, buffers, boolean(what about largely uneven distribution?) and dates(?)
+- [x] indexes on `index: true` flag in indexModel. will work best string, buffers, boolean(what about largely uneven distribution?) and dates(?)
   - [x] ~~boolean index, 2 subtrees~~
     * ~~one for `true`, one for `false`~~
     * ~~where <Key,Value> would be <DocId, SubtreeValue(true||false)>~~
@@ -28,11 +28,11 @@
   - [x] dates & number index
     - [x] ~~-> get inspired by cryptDB~~
     - [x] string encoding for numbers (and decimals!), that respect order/lexicographical relation. But that won't fix the problem you will have with the Pearson hashing function (loss of order)
-    - [ ] Rethink date granularity
+    - [x] ~~Rethink date granularity~~ Not for now...
 - [x] use indexes for unique value and id existence checks
-- [ ] use indexes in compound queries, using them to build a data subset when possible (on which the rest of the query will be ran)
+- [x] use indexes in compound queries, using them to build a data subset when possible (on which the rest of the query will be ran)
 - [ ] Write some more `save` and `bulkSave` examples
-- [ ] reorganize the parameters of `retrieveIndexDocsMatchingQuery()`
+- [x] ~~reorganize the parameters of `retrieveIndexDocsMatchingQuery()`~~ (Not currently necessary)
 - [ ] document the new indexModel API
 - [ ] document the new Collection API
 - [x] test clearIndexModel
@@ -53,3 +53,4 @@
 - [ ] Add an optional "default" value for a given field in IndexModel
 - [ ] `$fuzzy`, `$contain`/`$like`, `$fuzzylike`  matching on strings
 - [ ] Synchronization, on the cloud, HTTP+TLS+(HPKA||password)
+- [ ] Customizable date and number hashing granularity (so that records from the same day have the same hash and are stored in the same fragment; so that lookup is faster). Security implications to be investigated.
