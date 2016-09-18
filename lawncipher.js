@@ -2932,19 +2932,22 @@
 			}
 
 			function getIndexFileName(r){
-				return '_index_' + to_hex(longToBufferBE(r.start)) + '_' + to_hex(longToBufferBE(r.end));
+				return '_index_' + r.toString(); //to_hex(longToBufferBE(r.start)) + '_' + to_hex(longToBufferBE(r.end));
 			}
 
 			function retrieveIndexDocsMatchingQuery(query, limit, matchFunction, includePureBlobs, cb){
-
-				/*if (typeof query == 'string'){
+				if (typeof query == 'string'){
 					//Lookup by id;
 					collectionIndex.lookup(query, function(err, matchedDoc){
+						if (err){
+							cb(err);
+							return;
+						}
 						if (matchedDoc) matchedDoc.id = query;
-						cb(err, [matchedDoc]);
+						cb(err, matchedDoc ? [matchedDoc] : []);
 					});
 					return;
-				}*/
+				}
 
 				//Ignore sorting, as this will be done by the function calling this one (i.e : find or findOne)
 				query = query && shallowCopy(query);
@@ -2954,6 +2957,11 @@
 					sortAndSkipQuery = {$sort: query.$sort, $skip: query.$skip};
 					delete query.$sort;
 					delete query.$skip;
+				}
+
+				if (collectionIndexModel && collectionIndexModel.$summary.indexedFields.length > 0){
+					//There are search indexes that can be useful for our query
+
 				}
 
 				var resultSet = [];
@@ -2992,20 +3000,22 @@
 				}
 
 				//From here, dataset is forcibly an array
-
+				var originalDataset = dataset; //Referencing the original dataset, before $or or $not might change its reference
 				var queryResults = [];
 				var queryType = typeof query;
 				if (queryType == 'string'){
-					var matchFn = matchFunction || defaultMatchFunction;
+					var selectedMatchFunction = matchFunction || defaultMatchFunction;
 					//If only a string is provided, we are looking for a doc that has this string as id?
 					for (var i = 0; i < dataset.length; i++){
-						if (matchFn(dataset[i].id, query)){
+						if (selectedMatchFunction(dataset[i].id, query)){
 							queryResults.push(dataset[i]);
 							if (limit && queryResults.length == limit) return sortAndReturn();
 						}
 					}
 					return sortAndReturn();
 				}
+
+				var queryAttributes = Object.keys(query);
 
 				var withSorting = false;
 				var skipDocs;
@@ -3043,7 +3053,54 @@
 						throw new Error('invalid $or operand: ' + JSON.stringify(query));
 					}
 
-					//This is disturbingly inefficient
+					var oneDocDataset = new Array(1);
+
+					for (var i = 0; i < dataset.length; i++){
+						//Assumption there are more elements in the dataset than there are $or operands
+						var isMatch = false;
+						oneDocDataset[0] = dataset[i];
+						for (var j = 0; j < orQuery.length; j++){
+							isMatch |= applyQuery(orQuery[j], oneDocDataset).length === 1;
+							if (isMatch){
+								queryResults.push(dataset[i]);
+								break;
+							}
+						}
+					}
+
+					//Check whether there are other query attributes/parts, of if $not was the only part of the query
+					if (queryAttributes.length > 1){
+						/*
+						$or was not the only attribute query. Do not sortAndReturn now.
+						Because a compound query is considered as an AND operation, all the
+						remaining queryAttributes must not only all be true for a document
+						to be added to the resultset, but the document must also match
+						the $or operation.
+
+						Therefore, it's equivalent to having the resultset of the $or
+						operation as the dataset on which the rest of the query has to match
+						*/
+						dataset = queryResults;
+						queryResults = [];
+					} else return sortAndReturn();
+
+					/*var subMatchingFunctions = new Array(orQuery.length);
+					for (var i = 0; i < orQuery.length; i++){
+						subMatchingFunctions[i] = attributeValueCheckFactory(orQuery[i], matchFunction);
+					}
+
+					for (var i = 0; i < dataset.length; i++){
+						var isMatch = false;
+						for (var j = 0; j < subMatchingFunctions.length && !isMatch; j++){
+							isMatch |= subMatchingFunctions[j](dataset[i].index);
+							if (isMatch){
+								queryResults.push(dataset[i]);
+								break;
+							}
+						}
+					}*/
+
+					/*//This is disturbingly inefficient
 					var partialResults = [];
 					for (var i = 0; i < orQuery.length; i++){
 						//Querying the dataset with one of the $or operand's parameters
@@ -3056,36 +3113,52 @@
 
 					//Merge partial results into one dataset and return it
 					queryResults = unionResults(partialResults, limit);
-					return sortAndReturn();
+					//return sortAndReturn();*/
 				}
 				//Detect $not keyword
 				if (query['$not']){
 					var notQuery = query['$not'];
 					if (!(typeof notQuery == 'string' || typeof notQuery == 'object')) throw new Error('invalid $not operand: ' + JSON.stringify(query));
 
-					var matchFn = matchFunction || defaultMatchFunction
+					var selectedMatchFunction = matchFunction || defaultMatchFunction
 					if (typeof notQuery == 'string'){
-						var matchingSubset = applyQuery(notQuery, dataset, limit, negate(matchFn));
+						var matchingSubset = applyQuery(notQuery, dataset, limit, negate(selectedMatchFunction));
 						queryResults = matchingSubset;
-						return sortAndReturn();
+						//return sortAndReturn();
+					} else {
+						//Query is an object
+						var results = applyQuery(notQuery, dataset, limit, negate(selectedMatchFunction), true);
+						queryResults = results;
 					}
-					//Query is an object
-					var results = applyQuery(notQuery, dataset, limit, negate(matchFn), true);
-					queryResults = results;
-					return sortAndReturn();
+
+					//Check whether there are other query attributes/parts, of if $not was the only part of the query
+					if (queryAttributes.length > 1){
+						/*
+						$not was not the only attribute query. Do not sortAndReturn now.
+						Because a compound query is considered as an AND operation, all the
+						remaining queryAttributes must not only all be true for a document
+						to be added to the resultset, but the document must also match
+						the $not operation.
+
+						Therefore, it's equivalent to having the resultset of the $not
+						operation as the dataset on which the rest of the query has to match
+						*/
+						dataset = queryResults;
+						queryResults = [];
+					} else return sortAndReturn();
 				}
 				//Last case, standard "and" operation
-				var matchFn = matchFunction || defaultMatchFunction;
+				var selectedMatchFunction = matchFunction || defaultMatchFunction;
 
 				//console.log('Dataset to search through: ' + JSON.stringify(dataset));
-
-				var queryAttributes = Object.keys(query);
 
 				if (queryAttributes.length == 0){ //If there are no query components, match all the dataset, with the limit if one is imposed, if there is no sorting (otherwise it will be done after sorting, in sortAndReturn())
 					if (limit && !withSorting) for (var i = 0; i < limit && i < dataset.length; i++) queryResults.push(dataset[i]);
 					else queryResults = dataset;
 					return sortAndReturn();
 				}
+
+				var attributeValueCheck = attributeValueCheckFactory(query, selectedMatchFunction, queryAttributes);
 
 				for (var i = 0; i < dataset.length; i++){
 					if (!dataset[i].index){
@@ -3095,10 +3168,19 @@
 						continue; //No index data to search in
 					}
 
-					var matchedAttributes = 0;
+					var isMatching = attributeValueCheck(dataset[i].index);
+					if (isMatching){
+						queryResults.push(dataset[i]);
+						if (limit && queryResults.length == limit && !withSorting) return sortAndReturn();
+					}
+
+					/*var matchedAttributes = 0;
 					for (var j = 0; j < queryAttributes.length; j++){
+						//Skipping query attribute names that begin with the dollar sign, as they are query operators that must have been managed before hand
+						if (queryAttributes[i].indexOf('$') === 0) continue;
+
 						//Exclude the attribute that equals with $match. Note that not all docs have index data
-						if (matchFn(dataset[i].index[queryAttributes[j]], query[queryAttributes[j]]) || queryAttributes[j] == '$sort' || queryAttributes[j] == '$skip'){ //Ignoring the $sort & $skip attribute of the query, if any
+						if (selectedMatchFunction(dataset[i].index[queryAttributes[j]], query[queryAttributes[j]])){
 							matchedAttributes++;
 
 							if (matchedAttributes == queryAttributes.length){
@@ -3107,7 +3189,7 @@
 								break;
 							}
 						} else break; //If one of the query attributes is not matched, go to next document
-					}
+					}*/
 				}
 
 				return sortAndReturn();
@@ -3162,17 +3244,42 @@
 				}
 
 				function defaultMatchFunction(a, b){
-					return a == b;
+					return a === b;
 				}
 
 				function notMatchFunction(a, b){
-					return a != b;
+					return a !== b;
 				}
 
 				function negate(fn){
 					return function(a, b){
 						return !fn(a, b);
 					}
+				}
+			}
+
+			function attributeValueCheckFactory(query, matchFunction, _queryAttributes){
+				var queryAttributes = _queryAttributes || Object.keys(query);
+				for (var i = 0; i < queryAttributes.length; i++){
+					if (queryAttributes[i].indexOf('$') === 0){
+						queryAttributes.splice(i, 1);
+						i--;
+					}
+				}
+
+				var selectedMatchFunction = matchFunction || defaultMatchFunction;
+
+				return function(docIndex){
+					//console.log('current docIndex:\n' + JSON.stringify(docIndex, undefined, '\t'));
+					var matchedAttributes = 0;
+					for (var i = 0; i < queryAttributes.length; i++){
+						if (selectedMatchFunction(docIndex[queryAttributes[i]], query[queryAttributes[i]])){
+							matchedAttributes++;
+						} else break;
+					}
+					//console.log('Matched attributes: ' + matchedAttributes);
+					//console.log('Expected matching attributes: ' + queryAttributes.length);
+					return matchedAttributes === queryAttributes.length;
 				}
 			}
 
@@ -3911,6 +4018,7 @@
 		var idField;
 		var uniqueFields = [];
 		var idAndUniqueFields;
+		var indexedFields = [];
 
 		for (var i = 0; i < fieldNames.length; i++){
 			var fieldName = fieldNames[i];
@@ -3939,8 +4047,9 @@
 				}
 			}
 
-			if (fieldDescription.index && !isIndexable(fieldDescription.type)){
-				return 'FORBIDDEN_INDEX_FLAG:' + fieldName + '(' + fieldDescription.type + ')';
+			if (fieldDescription.index){
+				if (!isIndexable(fieldDescription.type)) return 'FORBIDDEN_INDEX_FLAG:' + fieldName + '(' + fieldDescription.type + ')';
+				indexedFields.push(fieldName);
 			}
 
 			if (fieldDescription.unique){
@@ -3965,6 +4074,7 @@
 			id: idField,
 			uniqueFields: uniqueFields,
 			idAndUniqueFields: idAndUniqueFields,
+			indexedFields: indexedFields,
 		};
 		if (!model.$summary) Object.defineProperty(model, '$summary', {value: modelSummary});
 
