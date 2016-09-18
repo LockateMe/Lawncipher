@@ -539,6 +539,8 @@
 		cryptoProvAsync = true;
 
 		scryptProv = function(password, salt, opsLimit, r, p, keyLength, callback){
+			if (!(password instanceof Uint8Array) && !is_hex(password)) password = from_string(password);
+
 			MiniSodium.crypto_pwhash_scryptsalsa208sha256_ll(password, salt, opsLimit, r, p, keyLength, callback);
 		};
 		scryptProvAsync = true;
