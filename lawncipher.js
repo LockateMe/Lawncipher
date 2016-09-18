@@ -578,7 +578,7 @@
 		if (!(typeof key == 'string' || key instanceof Uint8Array)) throw new TypeError('key must be a string or a Uint8Array');
 		if (typeof callback != 'function') throw new TypeError('missing callback');
 		if (cryptoProvAsync){
-			cryptoPrv.crypto_secretbox_open_easy.apply({}, Array.prototype.slice.call(arguments));
+			cryptoProv.crypto_secretbox_open_easy.apply({}, Array.prototype.slice.call(arguments));
 		} else {
 			var plain;
 			try {
