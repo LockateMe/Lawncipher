@@ -1827,7 +1827,7 @@
 			* Set the indexModel for this collection. To be preferably called right after the collection's creation
 			* @param {Object|Array<String>} indexModel - the document model to be used for this collection.
 			* @param {setIndexModelCallback} callback - the callback function, that gets called once the indexModel is saved and applied on all the indexed documents of the collection or if an error occurred. Receives (err, offendingDocs), where `err` is an error if one occurred, and `offendingDocs` is the `offendingDocs` property from `isIndexModelCompatible`'s result object
-			* @param {Boolean} [doNotApplyModel] - a boolean indicating whether the indexModel should or not be applied to documents already in the collection
+			* @param {Boolean} [doNotApplyModel] - a boolean indicating whether the indexModel should or not be applied to documents already in the collection; implying a load and potential re-write of every document in the collection
 			*/
 			this.setIndexModel = function(indexModel, cb, doNotApplyModel){
 				if (typeof indexModel != 'object') throw new TypeError('indexModel must be an object');
@@ -1968,7 +1968,7 @@
 			*/
 
 			/**
-			* @typedef {Object.<DocId, FieldName} FieldsToBeRemoved
+			* @typedef {Object.<DocId, FieldName>} FieldsToBeRemoved
 			*/
 
 			/**
