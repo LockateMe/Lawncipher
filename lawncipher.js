@@ -2644,56 +2644,61 @@
 							} else updateIndex(); //Saving the doc, adding the blob
 
 							function updateIndex(){
-								var newDataAttributes = Object.keys(newData);
-								var newIndexData = clone(indexData);
-								for (var i = 0; i < newDataAttributes.length; i++){
-									newIndexData[newDataAttributes[i]] = newData[newDataAttributes[i]];
+								var newIndexData;
+								if (indexData){
+									var newDataAttributes = Object.keys(newData);
+									newIndexData = clone(indexData);
+									for (var i = 0; i < newDataAttributes.length; i++){
+										newIndexData[newDataAttributes[i]] = newData[newDataAttributes[i]];
+									}
+
+									//If there is a model, validate against it
+									if (collectionIndexModel){
+										var validatedIndexData = validateIndexAgainstModel(newIndexData, collectionIndexModel);
+										if (typeof validatedIndexData == 'string' || !validatedIndexData){
+											next('INVALID_INDEX_DATA');
+											return;
+										}
+										newIndexData = validatedIndexData;
+
+										//Extracted supposed id and unique fields
+										var idField = collectionIndexModel.$summary.id;
+										var uniqueFields = collectionIndexModel.$summary.uniqueFields;
+
+										//Check that the id didn't change with the new data
+										if (idField && newIndexData[idField] != indexData[idField]){
+											next('ID_CHANGE_FORBIDDEN');
+											return;
+										}
+
+										//Checking fields unicity
+										var fieldUnicityIndex = 0;
+
+										function checkOneField(){
+											checkFieldIsUnique(uniqueFields[fieldUnicityIndex], newIndexData[uniqueFields[fieldUnicityIndex]], function(err, isUnique){
+												if (err){
+													next(err);
+													return;
+												}
+												if (!isUnique){
+													next('DUPLICATE_UNIQUE_VALUE');
+													return;
+												}
+												nextField();
+											});
+										}
+
+										function nextField(){
+											fieldUnicityIndex++;
+											if (uniqueFields.length == fieldUnicityIndex) save();
+											else checkOneField();
+										}
+
+										checkOneField();
+									} else save();
+								} else {
+									save();
 								}
-
-								//If there is a model, validate against it
-								if (collectionIndexModel){
-									var validatedIndexData = validateIndexAgainstModel(newIndexData, collectionIndexModel);
-									if (typeof validatedIndexData == 'string' || !validatedIndexData){
-										next('INVALID_INDEX_DATA');
-										return;
-									}
-									newIndexData = validatedIndexData;
-
-									//Extracted supposed id and unique fields
-									var idField = collectionIndexModel.$summary.id;
-									var uniqueFields = collectionIndexModel.$summary.uniqueFields;
-
-									//Check that the id didn't change with the new data
-									if (idField && newIndexData[idField] != indexData[idField]){
-										next('ID_CHANGE_FORBIDDEN');
-										return;
-									}
-
-									//Checking fields unicity
-									var fieldUnicityIndex = 0;
-
-									function checkOneField(){
-										checkFieldIsUnique(uniqueFields[fieldUnicityIndex], newIndexData[uniqueFields[fieldUnicityIndex]], function(err, isUnique){
-											if (err){
-												next(err);
-												return;
-											}
-											if (!isUnique){
-												next('DUPLICATE_UNIQUE_VALUE');
-												return;
-											}
-											nextField();
-										});
-									}
-
-									function nextField(){
-										fieldUnicityIndex++;
-										if (uniqueFields.length == fieldUnicityIndex) save();
-										else checkOneField();
-									}
-
-									checkOneField();
-								} else save();
 
 								function save(){
 									saveDoc(docId, blobData, newIndexData, 'json', collectionTTLs && collectionTTLs[docId], next)
