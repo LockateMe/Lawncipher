@@ -2670,30 +2670,35 @@
 										return;
 									}
 
-									//Checking fields unicity
-									var fieldUnicityIndex = 0;
+									if (uniqueFields.length > 0){
+										//Checking fields unicity
+										var fieldUnicityIndex = 0;
 
-									function checkOneField(){
-										checkFieldIsUnique(uniqueFields[fieldUnicityIndex], newIndexData[uniqueFields[fieldUnicityIndex]], function(err, isUnique){
-											if (err){
-												next(err);
-												return;
-											}
-											if (!isUnique){
-												next('DUPLICATE_UNIQUE_VALUE');
-												return;
-											}
-											nextField();
-										}, true); //postInsert == true
+										function checkOneField(){
+											checkFieldIsUnique(uniqueFields[fieldUnicityIndex], newIndexData[uniqueFields[fieldUnicityIndex]], function(err, isUnique){
+												if (err){
+													next(err);
+													return;
+												}
+												if (!isUnique){
+													next('DUPLICATE_UNIQUE_VALUE');
+													return;
+												}
+												nextField();
+											}, true); //postInsert == true
+										}
+
+										function nextField(){
+											fieldUnicityIndex++;
+											if (uniqueFields.length == fieldUnicityIndex) save();
+											else checkOneField();
+										}
+
+										checkOneField();
+									} else {
+										//No more index checks to be done. Save the doc
+										save();
 									}
-
-									function nextField(){
-										fieldUnicityIndex++;
-										if (uniqueFields.length == fieldUnicityIndex) save();
-										else checkOneField();
-									}
-
-									checkOneField();
 								} else save();
 
 								function save(){
