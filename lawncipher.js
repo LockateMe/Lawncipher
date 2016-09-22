@@ -3120,6 +3120,10 @@
 						}
 					}
 				} else {
+					iterationOverIndex();
+				}
+
+				function iterationOverIndex(){
 					function mapFn(subset, countResult){
 						//Note that, because subset is Hash<DocId, Doc>, a full deep-copy of this object is built at the beginning of applyQuery
 						//This deep-copy is NECESSARY for the database data to be immutable, because we are calling collectionIndex.map with forQuery === true
