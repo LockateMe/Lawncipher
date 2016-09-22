@@ -3118,6 +3118,8 @@
 								else lookupOne();
 							}
 						}
+
+						lookupOne();
 					}
 				} else {
 					iterationOverIndex();
