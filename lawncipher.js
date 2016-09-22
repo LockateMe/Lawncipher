@@ -3110,8 +3110,8 @@
 						}
 
 						function lookupNext(){
-							lookupNext++;
-							if (lookupNext === docsList.length){
+							lookupIndex++;
+							if (lookupIndex === docsList.length){
 								_cb(undefined, matchingDocs);
 							} else {
 								if (lookupNext % 100 === 0) setTimeout(lookupOne, 0);
