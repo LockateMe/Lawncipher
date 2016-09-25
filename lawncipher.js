@@ -3047,8 +3047,8 @@
 
 								if (sortAndSkipQuery){
 									//Add the $sort and $skip that were previously removed
-									query.$sort = sortAndSkipQuery.$sort;
-									query.$skip = sortAndSkipQuery.$skip;
+									if (sortAndSkipQuery.$sort) query.$sort = sortAndSkipQuery.$sort;
+									if (sortAndSkipQuery.$skip) query.$skip = sortAndSkipQuery.$skip;
 								}
 								//Process the rest of the query, with the $sort, $skip and the limit parameter
 								//Note that, because currentDataset is Hash<DocId, Doc>, a full deep-copy of this object is built at the beginning of applyQuery
@@ -3066,23 +3066,25 @@
 					//Builds the set intersection of a set of Array<String>
 					function intersectDocIds(partialResults){
 						var partialResultsList = Object.keys(partialResults);
-						if (partialResultsList.length > 0){
-							var currentResultSet = {};
-							for (var i = 0; i < partialResults[partialResultsList[0]].length; i++){
-								currentResultSet[partialResults[partialResultsList[0]][i]] = true;
-							}
-							for (var i = 1; i < partialResultsList.length; i++){
-								//Checking that every element in currentResultSet is also present in every remaining partialResults chunk
-								for (var currentResult in currentResultSet){
-									var currentResultFound = false;
-									for (var j = 0; j < partialResults[partialResultsList[i]].length; j++){
-										if (partialResults[partialResultsList[i]][j] === currentResult){
-											currentResultFound = true;
-											break;
-										}
+						if (partialResultsList.length === 0){
+							return [];
+						}
+
+						var currentResultSet = {};
+						for (var i = 0; i < partialResults[partialResultsList[0]].length; i++){
+							currentResultSet[partialResults[partialResultsList[0]][i]] = true;
+						}
+						for (var i = 1; i < partialResultsList.length; i++){
+							//Checking that every element in currentResultSet is also present in every remaining partialResults chunk
+							for (var currentResult in currentResultSet){
+								var currentResultFound = false;
+								for (var j = 0; j < partialResults[partialResultsList[i]].length; j++){
+									if (partialResults[partialResultsList[i]][j] === currentResult){
+										currentResultFound = true;
+										break;
 									}
-									if (!currentResultFound) delete currentResultSet[currentResult];
 								}
+								if (!currentResultFound) delete currentResultSet[currentResult];
 							}
 						}
 
@@ -3092,6 +3094,10 @@
 
 					//Lookup the docs matching the docIds in docsList, and builds a Hash<DocId, Doc>
 					function lookupMatchingDocs(docsList, _cb){
+						if (!docsList || docsList.length === 0){
+							_cb(undefined, []);
+							return;
+						}
 						var lookupIndex = 0;
 						var matchingDocs = {};
 
@@ -3114,7 +3120,7 @@
 							if (lookupIndex === docsList.length){
 								_cb(undefined, matchingDocs);
 							} else {
-								if (lookupNext % 100 === 0) setTimeout(lookupOne, 0);
+								if (lookupIndex % 100 === 0) setTimeout(lookupOne, 0);
 								else lookupOne();
 							}
 						}
@@ -3388,16 +3394,11 @@
 			}
 
 			function attributeValueCheckFactory(query, matchFunction, _queryAttributes){
-				var queryAttributes;
-				if (query.$queryAttributes){
-					queryAttributes = query.$queryAttributes;
-				} else {
-					queryAttributes = _queryAttributes || Object.keys(query);
-					for (var i = 0; i < queryAttributes.length; i++){
-						if (queryAttributes[i].indexOf('$') === 0){
-							queryAttributes.splice(i, 1);
-							i--;
-						}
+				var queryAttributes = Object.keys(query);
+				for (var i = 0; i < queryAttributes.length; i++){
+					if (queryAttributes[i].indexOf('$') === 0){
+						queryAttributes.splice(i, 1);
+						i--;
 					}
 				}
 
@@ -4919,6 +4920,7 @@
 		var opQueueRanges = []; //Array<PearsonRangeStr>
 		var opQueueTasksPerRange = {}; //Hash<PearsonRangeStr, Array<Function>>
 		var opCount = 0;
+		var opRangesLock = {}; //Hash<PearsonRangeStr, Boolean>
 		var checkMemoryUsageLock = false;
 
 		//An processOpQueue call recurses on the same range that it started with, if possible... Otherwise, just take the next range to be processed
@@ -4962,9 +4964,14 @@
 				hasPendingWorkForRange = true;
 			}
 
+			//opRangesLock[currentTaskRangeStr] = true;
+			//console.log('lock in; current state:\n' + JSON.stringify(opRangesLock, undefined, '\t'));
+
 			currentTask(next);
 
 			function next(e){
+				//delete opRangesLock[currentTaskRangeStr];
+				//console.log('lock out; current state:\n' + JSON.stringify(opRangesLock, undefined, '\t'));
 				if (e) throw e;
 
 				opCount++;
@@ -4994,6 +5001,16 @@
 							delete opQueueTasksPerRange[nextRange.toString()]; //There is a queue, but its empty... Look for a new nextRange
 							continue;
 						}
+
+						/*
+						//If there is a lock in place, try to work on an other range
+						if (opRangesLock[nextRange.toString()]){ // && opQueueRanges.length > 0){
+							//This stuff is very likely doomed to failure.
+							//See where the locks writes and releases fail..
+							//-> console
+							opQueueRanges.push(nextRange);
+							continue;
+						}*/
 
 						//There are pending tasks for nextRange. Therefore, we select nextRange...
 						selectedRange = nextRange;
