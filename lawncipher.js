@@ -4159,7 +4159,7 @@
 						try {
 							unicitySets[fieldsList[j]].tree.add(nodeSubset[nodeSubsetKeysList[i]].index[fieldsList[j]], nodeSubsetKeysList[i], true);
 						} catch (e){
-							if (e instanceof RangeError) addOffendingReason(nodeSubsetKeysList[i], fieldsList[j], 'non-unique');
+							if (e instanceof RangeError) addOffendingReason(nodeSubsetKeysList[i], fieldsList[j], 'not_unique');
 							else console.error('Unexpected error when checking adding field ' + fieldsList[j] + ' for doc ' + nodeSubsetKeysList[i] + ': ' + JSON.stringify(e));
 						}
 					}

@@ -54,10 +54,18 @@ Deleting an existing collection. Note that this operation once invoked cannot be
 * `Function callback` : the callback function, receiving `(err)`, a string briefly describing the error, if one occurred
 
 ## `Collection.getIndexModel()`
+Get a copy of the IndexModel currently enforced on the indexed data of the collection
 
-## `Collection.setIndexModel(indexModel, cb, doNotApplyModel)`
+## `Collection.setIndexModel(indexModel, cb, [doNotApplyModel])`
+Set a new IndexModel for the current collection. Performs all the compatibility checks (via isIndexModelCompatible; unless the `doNotApplyModel == true`)
+* `Object indexModel` : the new index model that we want to use
+* `Function callback` : callback function, receiving `(err, offendingDocs)`.
+  * `err` is defined if an error occurred; it is most likely a string succinctly describing the error.
+  * `offendingDocs` is defined if there are documents that offend the new `indexModel`. It is built as `Hash<DocId, Hash<FieldName, Array<OffendingReason>>>`, where `OffendingReason` is a string and is equal to `not_unique` or `type_mismatch`.
+* `Boolean [doNotApplyModel]` : optional parameter. If true, fields that were indexed in the previous model are not removed from the index after the adoption of the new model. Search indices built for these now-removed-from-model fields are not deleted either; Lawncipher will continue to use them to speed up searches, but they will stop being updated.
 
-## `Collection.clearIndexModel(cb)`
+## `Collection.clearIndexModel(cb, doNot)`
+Remove the existing
 
 ## `Collection.isIndexModelCompatible(indexModel, cb)`
 

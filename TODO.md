@@ -7,6 +7,8 @@
   - [x] add a method to make a "dry run" of a indexModel change. The method will iterate and validate each document against the new indexModel. No change will be made on the docs/collection though. But this method can prevent us from having to design a "rollback"-able indexModel change...
   - [x] Adding an operation queue is good idea to block the flow and dodge race condition. Or a "lock" state variable. (Operation queueing in each Index instance)
   - [ ] WHAT DOES "doNotApplyModel" ENTAIL???
+  - [ ] handle checkResults.fieldsToBeRemoved && doNotApplyModel's value
+  - [ ] Use every search index available, even if it is not in the current IndexModel
 - [ ] Add more "unique" & "index" flags test vectors
 - [x] Add automatic type casting, allowing flexibility when saving a document or migrating index models
 - [x] Add checks for "index" flag in `validateIndexModel`
