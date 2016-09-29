@@ -1852,7 +1852,7 @@
 				// What does this imply for existing docs?
 				// What does this imply for future docs?
 				// When doNotApplyModel == true, the indexing is simply skipped...
-				// Potential usage : keep the indexed fields that we are added with the previous model, by that will be removed with the new one...
+				// Potential usage : keep the indexed fields of the previous models that will be removed by the new one...
 				if (doNotApplyModel){
 					saveModel();
 					return;
@@ -1893,7 +1893,14 @@
 
 					saveModel(function(){
 						loadAllSearchIndices(function(){
-							deleteSearchIndexes(checkResults.indexDeletions, cb);
+							deleteSearchIndexes(checkResults.indexDeletions, function(err){
+								if (err){
+									cb(err);
+									return;
+								}
+
+								applyModel(checkResults, cb);
+							});
 						}, checkResults.indexAndUniqueSets);
 					});
 				});
@@ -1920,6 +1927,63 @@
 							else cb();
 						});
 					});
+				}
+
+				function applyModel(checkResults, next){
+					var fieldsToBeRemoved = checkResults.fieldsToBeRemoved;
+					var fieldsToBeRemovedCount = checkResults.fieldsToBeRemovedCount;
+
+					var collectionIterator = collectionIndex.nodeIterator();
+					var currentNode;
+					var nodeCount = 0;
+
+					nextNode();
+
+					function processNode(){
+						var currentSubCollection = currentNode.getBinnedRange().subCollection;
+						var currentSubCollectionList = Object.keys(currentSubCollection);
+
+						if (currentSubCollectionList.length === 0){
+							nextNode();
+							return;
+						}
+
+						for (var i = 0; i < currentSubCollectionList.length; i++){
+							var currentDocId = currentSubCollectionList[i];
+							//Check that there are fields that need to be removed from the current doc
+							if (!fieldsToBeRemoved[currentDocId]) continue;
+
+							var fieldsToBeRemovedList = Object.keys(fieldsToBeRemoved[currentDocId]);
+							var currentDoc = currentSubCollection[currentDocId];
+							//Remove the doc (as-is) from the collection
+							currentIndex.remove(currentDocId, currentDoc, undefined, true);
+							//Remove the fields
+							for (var j = 0; j < fieldsToBeRemovedList.length; j++){
+								delete currentDoc[fieldsToBeRemovedList[j]];
+							}
+							currentIndex.add(currentDocId, currentDoc, undefined, true);
+						}
+
+						nextNode();
+					}
+
+					function nextNode(){
+						if (collectionIterator.hasNext()){
+							collectionIterator.next(function(err, _n){
+								if (err){
+									next(err);
+									return;
+								}
+
+								currentNode = _n;
+								nodeCount++;
+								if (nodeCount % 100 === 0) setTimeout(processNode, 0);
+								else processNode();
+							})
+						} else {
+							next();
+						}
+					}
 				}
 			};
 
@@ -6556,8 +6620,17 @@
 							if (subCollection[key] && !replace) throw new RangeError('key "' + key + '" already taken');
 							subCollection[key] = value
 						} else {
-							if (subCollection[key]) subCollection[key].push(value);
-							else subCollection[key] = [value];
+							if (subCollection[key]){
+								//Check that there are no duplicates
+								var valueFound = false;
+								for (var i = 0; i < subCollection[key].length; i++){
+									if (deepObjectEquality(subCollection[key][i], value)){
+										valueFound = true;
+										break;
+									}
+								}
+								if (!valueFound) subCollection[key].push(value);
+							} else subCollection[key] = [value];
 						}
 
 						self.scheduleEvents([{_change: true, rangeStr: getRangeString(thisNode.range()), subCollection: subCollection}], noTrigger);
