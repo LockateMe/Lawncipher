@@ -2,6 +2,14 @@
 
 [Lawnchair](http://brian.io/lawnchair) and [MongoDB](https://www.mongodb.org)-inspired [libsodium](https://github.com/jedisct1/libsodium)-backed encrypted persistent document storage. Designed (and [tested](#testing)) for [Cordova](http://cordova.apache.org)/[Phonegap](http://phonegap.com) and [Node.js](https://nodejs.org)
 
+## WARNING
+
+__Lawncipher v2.0 is still in beta stage.__ There are some problems with document validation (against an IndexModel) and some race conditions.
+
+For stability, please use [Lawncipher v1](https://github.com/LockateMe/Lawncipher/tree/46f8b2fcb79f0738f28db9208d56a328c1b6564f) instead, and install it simply with `npm install lawncipher`
+
+If you want to use Lawncipher v2, install it with `npm install lawncipher@beta`
+
 ## Goal
 
 Building a rather versatile and persistent encrypted document storage.

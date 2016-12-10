@@ -64,10 +64,16 @@ Set a new IndexModel for the current collection. Performs all the compatibility 
   * `offendingDocs` is defined if there are documents that offend the new `indexModel`. It is built as `Hash<DocId, Hash<FieldName, Array<OffendingReason>>>`, where `OffendingReason` is a string and is equal to `not_unique` or `type_mismatch`.
 * `Boolean [doNotApplyModel]` : optional parameter. If true, fields that were indexed in the previous model are not removed from the index after the adoption of the new model. Search indices built for these now-removed-from-model fields are not deleted either; Lawncipher will continue to use them to speed up searches, but they will stop being updated.
 
-## `Collection.clearIndexModel(cb, doNot)`
-Remove the existing
+## `Collection.clearIndexModel(cb)`
+Remove the existing index model
 
 ## `Collection.isIndexModelCompatible(indexModel, cb)`
+Check whether the provided `indexModel` is compatible with the collection's current data
+* `Object indexModel` : the indexModel against which we check the collection data compatibility
+* `Function cb(err, isValid, checkResults)` : Callback function
+  * `err` is defined if an error occurred
+  * `isValid` : a boolean, stating whether the provided `indexModel` is compatible with the collection's data or not
+  * `checkResults` : an object describing the in/compatibility. For more details about `checkResults`, look at the end of this document.
 
 ## `Collection.save(doc, cb, [overwrite], [ttl])`
 Save a document/blob in the current collection.
@@ -169,4 +175,12 @@ It works a bit like in MongoDB:
 * You can skip/omit results of a query through the `$skip` operator. To skip x results, add a `$skip: x` attribute to your query. Useful (and stable/consistent!) when used in conjunction of `$sort` (and optionally limiting the result set size through the `limit` parameter of the `find()` method)
 
 __About Time-to-live (TTL)__
-Lawncipher checks for expired docs every 5 seconds
+Lawncipher checks for expired docs & deletes them every 5 seconds
+
+__About `checkResults`__
+`checkResults` is an object describing an `IndexModel`'s in/compatibility with a collection's data. It carries the following attributes:
+* `offendingDocs`: An object listing all the documents that offend the indexModel (either in data types or value unicity). It is built as `Hash<DocId, Hash<FieldName, Array<OffendingReason>>>`, where `OffendingReason` is a string and is equal to `not_unique` or `type_mismatch`.
+* `offendingDocsCount`: The number of distinct documents that offend the new model
+* `indexDeletions`: An `Array<String>` listing the search indices that will be deleted after the adoption of the `indexModel`
+* `fieldsToBeRemoved`: An object listing the documents where some indexed fields will be removed on adoption and enforcement of the `indexModel`. It is built as `Hash<DocId, Array<FieldName>>`.
+* `fieldsToBeRemovedCount`: The total number of attributes that will be removed on adoption and enforcement of the `indexModel`
