@@ -9,6 +9,8 @@
   - [ ] WHAT DOES "doNotApplyModel" ENTAIL???
   - [ ] handle checkResults.fieldsToBeRemoved && doNotApplyModel's value
   - [ ] Use every search index available, even if it is not in the current IndexModel
+  - [ ] On clearIndexModel, delete the search indices
+  - [ ] After a setIndexModel call with `doNotApplyModel == true`, what should we do with stale indexes???
 - [ ] Add more "unique" & "index" flags test vectors
 - [x] Add automatic type casting, allowing flexibility when saving a document or migrating index models
 - [x] Add checks for "index" flag in `validateIndexModel`
